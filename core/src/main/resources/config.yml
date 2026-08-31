@@ -1,0 +1,116 @@
+# Debug模式，用于调试村民行为。
+debug: false
+
+# 是否接入 CustomCrops 的 BLOCK 模式作物。
+custom-crops:
+  enabled: true
+
+# 村民会交互的作物方块 (包括Craftengine作物)。
+#   seed: 该作物的种子物品 id（如 minecraft:wheat_seeds 、 farmersdelight:tomato_seeds）。
+#   soils: 该作物额外允许的种植土壤（minecraft:farmland 原版耕地始终允许；
+#          extra-soils 全局配置的方块所有作物均可种，无需在此重复）。
+#          tall 模式作物的 soils 列其允许种植的底层方块。
+#   harvest-mode: break（默认，村民调用CE的 BREAK 事件收割作物）/ pick（采摘式：收割后重种回 0 AGE）/
+#                 tall（双格作物：只收割成熟的上半，下半保留）。
+#   water: 种植需求的流体 id（如 minecraft:water），配置后只允许种在该流体上。
+#   plant-block: 村民种植时放置的方块 id（可选；留空 = 用作物自身的方块 id）。
+# 不在清单内的方块不会被村民识别为作物（收割/种植都不会处理，原版作物除外）。
+crops:
+  farmersdelight:wheat:
+    seed: minecraft:wheat_seeds
+  farmersdelight:beetroots:
+    seed: minecraft:beetroot_seeds
+  farmersdelight:carrots:
+    seed: minecraft:carrot
+  farmersdelight:potatoes:
+    seed: minecraft:potato
+  farmersdelight:cabbages:
+    seed: farmersdelight:cabbage_seeds
+  farmersdelight:tomatoes:
+    seed: farmersdelight:tomato_seeds
+    harvest-mode: pick
+    plant-block: farmersdelight:budding_tomatoes
+  farmersdelight:rice:
+    seed: farmersdelight:rice
+    harvest-mode: tall
+    water: minecraft:water
+    soils:
+      - minecraft:grass_block
+      - minecraft:dirt
+      - minecraft:mud
+      - minecraft:clay
+      - minecraft:sand
+      - minecraft:coarse_dirt
+      - minecraft:rooted_dirt
+      - minecraft:podzol
+      - minecraft:mycelium
+  farmersdelight:onions:
+    seed: farmersdelight:onion
+
+# 永不识别的作物 id（黑名单，叠加在 crops 清单之上）。
+disabled-crops: []
+
+# 额外土壤：所有上方列出的作物默认都可种在这些方块上（原版耕地始终允许）。
+extra-soils:
+  - farmersdelight:rich_soil_farmland
+
+# 收割掉物（按作物 id 配置；未配置的作物收割后不掉落物品）。
+harvest-drops:
+  farmersdelight:wheat:
+    - minecraft:wheat:1
+    - minecraft:wheat_seeds:1
+  farmersdelight:beetroots:
+    - minecraft:beetroot:1
+    - minecraft:beetroot_seeds:1
+  farmersdelight:carrots:
+    - minecraft:carrot:1
+  farmersdelight:potatoes:
+    - minecraft:potato:1
+  farmersdelight:cabbages:
+    - farmersdelight:cabbage:1
+    - farmersdelight:cabbage_seeds:1
+  farmersdelight:tomatoes:
+    - farmersdelight:tomato:1
+    - farmersdelight:tomato_seeds:1
+  farmersdelight:rice:
+    - farmersdelight:rice:1
+    - farmersdelight:rice_panicle:1
+  farmersdelight:onions:
+    - farmersdelight:onion:1
+
+# 村民拾取设置：
+# crops: 村民会拾取的种子物品，留空以自动识别已配置的作物种子。
+# foods: 食物产物列表。追加 villager_picks_up tag 使村民能捡起，并识别为食物；
+#         计入繁殖食物点数，繁殖时被村民消耗。
+#         留空则不进行判定。
+pickup:
+  enabled: true
+  crops: []
+  foods:
+    - farmersdelight:cabbage
+    - farmersdelight:tomato
+    - farmersdelight:onion
+    - farmersdelight:rice
+    - farmersdelight:rice_panicle
+
+# 村民可堆肥的额外物品。
+# 这些物品会加入村民的堆肥桶工作列表和堆肥桶配方表，村民收割后能把它们
+# 堆成骨粉用于催熟作物。注意:在此配置的物品会被堆肥桶接受堆肥。
+compost-items:
+  - farmersdelight:cabbage_seeds
+  - farmersdelight:tomato_seeds
+  - farmersdelight:rice
+  - farmersdelight:cabbage
+  - farmersdelight:tomato
+  - farmersdelight:onion
+  - farmersdelight:rice_panicle
+
+# 配置此项后村民会把对应物品分享给附近其他村民。
+# 持有量超过半组(maxStackSize/2)时，把多余的一半一次分给背包未满且需要该物品的邻近村民；否则不分享。
+share-items:
+  enabled: true
+  items:
+    - minecraft:wheat
+
+# 注入器重扫间隔（秒），用于对抗其他插件对村民的修改。
+rescan-seconds: 30
