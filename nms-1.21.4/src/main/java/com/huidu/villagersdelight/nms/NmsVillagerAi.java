@@ -9,19 +9,14 @@ import net.minecraft.world.entity.ai.behavior.HarvestFarmland;
 import net.minecraft.world.entity.ai.behavior.ShufflingList;
 import net.minecraft.world.entity.ai.behavior.WorkAtComposter;
 import net.minecraft.world.entity.ai.behavior.UseBonemeal;
-import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.sensing.SensorType;
 import net.minecraft.world.entity.schedule.Activity;
 import net.minecraft.world.entity.npc.Villager;
-import com.google.common.collect.ImmutableSet;
-import net.minecraft.core.Holder;
-import net.minecraft.core.Registry;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.ai.behavior.Behavior;
-import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.bukkit.Bukkit;
@@ -30,8 +25,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.VillagerCareerChangeEvent;
+import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -41,7 +36,7 @@ import java.util.Map;
 import java.util.Set;
 
 // Replaces vanilla HarvestFarmland in farmer brains with VillagerFarmBehavior. Runs on spawn
-// (covers cured zombie villagers) and on a periodic rescan (other plugins rebuild brains). The
+// (covers cured zombie villagers) and when a chunk loads. All handlers run on the entity's owning region. The
 // farm behavior lives inside the WORK RunOne (a GateBehavior): the replacement descends into
 // every gate's ShufflingList and swaps the entry while keeping its weight.
 public final class NmsVillagerAi implements VillagerAiInjector, Listener {
@@ -64,7 +59,6 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
     private VillagersDelightPlugin plugin;
     private boolean installed;
-    private ScheduledTask rescanTask;
 
     private static Field findField(Class<?> clazz, String name) {
         try {
@@ -93,9 +87,6 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         }
         this.plugin = JavaPlugin.getPlugin(VillagersDelightPlugin.class);
         this.plugin.getServer().getPluginManager().registerEvents(this, this.plugin);
-        long delayTicks = Math.max(20L, this.plugin.config().rescanSeconds() * 20L);
-        this.rescanTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(
-                this.plugin, task -> this.rescanAll(), delayTicks, delayTicks);
         this.installed = true;
     }
 
@@ -105,58 +96,6 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             return;
         }
         this.installed = false;
-        ScheduledTask task = this.rescanTask;
-        this.rescanTask = null;
-        if (task != null) {
-            task.cancel();
-        }
-    }
-
-
-    @Override
-    public void augmentFarmerRequestedItems(java.util.List<String> itemIds) {
-        if (this.plugin == null || itemIds == null || itemIds.isEmpty()) {
-            return;
-        }
-        try {
-            Registry<VillagerProfession> registry = BuiltInRegistries.VILLAGER_PROFESSION;
-            VillagerProfession original = VillagerProfession.FARMER;
-            ImmutableSet<Item> existing = original.requestedItems();
-            ImmutableSet.Builder<Item> builder = ImmutableSet.<Item>builder().addAll(existing);
-            int added = 0;
-            for (String id : itemIds) {
-                ResourceLocation loc = ResourceLocation.tryParse(id);
-                if (loc == null) {
-                    continue;
-                }
-                Item item = BuiltInRegistries.ITEM.getValue(loc);
-                if (item != null && !existing.contains(item)) {
-                    builder.add(item);
-                    added++;
-                }
-            }
-            if (added == 0) {
-                return;
-            }
-            VillagerProfession upgraded = new VillagerProfession(
-                    original.name(),
-                    original.heldJobSite(),
-                    original.acquirableJobSite(),
-                    builder.build(),
-                    original.secondaryPoi(),
-                    original.workSound());
-            ResourceLocation farmerKey = registry.getKey(original);
-            Holder.Reference<VillagerProfession> farmer = farmerKey == null ? null : registry.get(farmerKey).orElse(null);
-            if (farmer == null) {
-                return;
-            }
-            Field value = Holder.Reference.class.getDeclaredField("value");
-            value.setAccessible(true);
-            value.set(farmer, upgraded);
-            VillagersDelightPlugin.debug("pickup: farmer requestedItems augmented with " + added + " item(s): " + itemIds);
-        } catch (Throwable t) {
-            this.plugin.getLogger().warning("Failed to augment farmer requested items: " + t);
-        }
     }
 
     @Override
@@ -217,18 +156,23 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
     // A villager only becomes a farmer after claiming a workstation, which happens after spawn when
     // the profession is still NONE. Inject right away on the profession change instead of waiting
-    // for the periodic rescan.
+    // when the profession changes.
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onCareerChange(VillagerCareerChangeEvent event) {
-        // getProfession() carries the profession the villager changed to.
         if (event.getProfession() == org.bukkit.entity.Villager.Profession.FARMER) {
-            this.replace(event.getEntity());
+            scheduleReplaceAfterCareerChange(event.getEntity());
         }
     }
 
-    private void rescanAll() {
-        for (org.bukkit.World world : Bukkit.getWorlds()) {
-            for (org.bukkit.entity.Villager villager : world.getEntitiesByClass(org.bukkit.entity.Villager.class)) {
+    private void scheduleReplaceAfterCareerChange(org.bukkit.entity.Villager villager) {
+        // The event fires before vanilla applies the new profession and refreshes the brain.
+        villager.getScheduler().runDelayed(this.plugin, task -> this.replace(villager), null, 1L);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEntitiesLoad(EntitiesLoadEvent event) {
+        for (org.bukkit.entity.Entity entity : event.getEntities()) {
+            if (entity instanceof org.bukkit.entity.Villager villager) {
                 this.replace(villager);
             }
         }
@@ -236,6 +180,10 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
     @SuppressWarnings("unchecked")
     private void replace(org.bukkit.entity.Villager bukkitVillager) {
+        if (!Bukkit.isOwnedByCurrentRegion(bukkitVillager)) {
+            bukkitVillager.getScheduler().run(this.plugin, task -> replace(bukkitVillager), null);
+            return;
+        }
         try {
             Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) bukkitVillager).getHandle();
             Brain<Villager> brain = handle.getBrain();
@@ -258,8 +206,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             // Install the extra-soil aware secondary-POI sensor so a pure CE farm populates SECONDARY_JOB_SITE.
             try {
                 Map<Object, Object> sensors = (Map<Object, Object>) BRAIN_SENSORS.get(brain);
-                // Sensors are stable across normal rescans, but behavior lists may be rebuilt by another
-                // plugin or a CE reload, so continue with the behavior walk even when sensors are patched.
+                // Keep the sensor replacement idempotent for repeated entity lifecycle events.
                 if (!(sensors.get(SensorType.SECONDARY_POIS) instanceof VillagerSecondaryPoiSensor)) {
                     sensors.put(SensorType.SECONDARY_POIS, new VillagerSecondaryPoiSensor());
                 }

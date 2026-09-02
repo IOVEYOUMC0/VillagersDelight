@@ -96,8 +96,17 @@ public final class VillagerShareItems extends Behavior<Villager> {
     private Villager findReceiver(ServerLevel level, Villager villager, ShareCandidate candidate, ItemStack giveStack) {
         int keep = candidate.maxStackSize() / 2;
         Location center = new Location(level.getWorld(), villager.getX(), villager.getY(), villager.getZ());
+        int minChunkX = ((int) Math.floor(center.getX() - SCAN_RANGE)) >> 4;
+        int maxChunkX = ((int) Math.floor(center.getX() + SCAN_RANGE)) >> 4;
+        int minChunkZ = ((int) Math.floor(center.getZ() - SCAN_RANGE)) >> 4;
+        int maxChunkZ = ((int) Math.floor(center.getZ() + SCAN_RANGE)) >> 4;
+        if (!org.bukkit.Bukkit.isOwnedByCurrentRegion(level.getWorld(), minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
+            return null;
+        }
         for (org.bukkit.entity.Entity entity : level.getWorld().getNearbyEntities(center, SCAN_RANGE, SCAN_RANGE, SCAN_RANGE)) {
-            if (!(entity instanceof org.bukkit.entity.Villager other) || other.getUniqueId().equals(villager.getUUID())) {
+            if (!(entity instanceof org.bukkit.entity.Villager other)
+                    || !org.bukkit.Bukkit.isOwnedByCurrentRegion(other)
+                    || other.getUniqueId().equals(villager.getUUID())) {
                 continue;
             }
             Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) other).getHandle();

@@ -21,12 +21,14 @@ import org.bukkit.craftbukkit.block.CraftBlock;
 import org.bukkit.craftbukkit.event.CraftEventFactory;
 import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 // Drop-in replacement for the vanilla WorkAtComposter. The vanilla behavior only compacts the two
 // hard-coded seeds and relies on the global COMPOSTABLES table; extending that table would make
-// the base material of CE items (e.g. nether bricks) compostable for everyone. This version keeps
+// the base material of CE items (e.g. nether bricks) compostable for everyone. The replacement keeps
 // the vanilla table untouched and additionally accepts configured CE items matched by their CE
 // custom id, reproducing the vanilla fill logic against the real composter block.
 public final class VillagerWorkAtComposter extends WorkAtComposter {
@@ -57,13 +59,15 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
         }
         int totalItemsToUse = MAX_ITEMS_PER_WORK;
         SimpleContainer inventory = body.getInventory();
+        Map<String, Integer> itemsSeen = new HashMap<>();
         BlockState tempState = blockState;
         for (int i = inventory.getContainerSize() - 1; i >= 0 && totalItemsToUse > 0; i--) {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty() || !isCompostable(stack)) {
                 continue;
             }
-            int itemsToUse = Math.min(Math.min(stack.getCount() - MIN_STACK_KEPT, totalItemsToUse), stack.getCount());
+            int totalItemCount = itemsSeen.merge(compostId(stack), stack.getCount(), Integer::sum);
+            int itemsToUse = Math.min(Math.min(totalItemCount - MIN_STACK_KEPT, totalItemsToUse), stack.getCount());
             if (itemsToUse <= 0) {
                 continue;
             }
@@ -128,6 +132,12 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
                 || ids.contains(bukkit.getType().getKey().toString());
     }
 
+    private static String compostId(ItemStack stack) {
+        org.bukkit.inventory.ItemStack bukkit = CraftItemStack.asBukkitCopy(stack);
+        net.momirealms.craftengine.core.util.Key custom = CeItemAccess.customItemId(bukkit);
+        return custom != null ? custom.toString() : bukkit.getType().getKey().toString();
+    }
+
     private static float compostChance(ItemStack stack) {
         if (CeItemAccess.customItemId(CraftItemStack.asBukkitCopy(stack)) != null) {
             return NmsVillagerAi.COMPOST_CHANCE;
@@ -154,9 +164,7 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
         inventory.removeItemType(Items.WHEAT, breadToMake * 3);
         ItemStack leftOver = inventory.addItem(new ItemStack(Items.BREAD, breadToMake));
         if (!leftOver.isEmpty()) {
-            body.forceDrops = true;
             body.spawnAtLocation(level, leftOver, 0.5F);
-            body.forceDrops = false;
         }
     }
 

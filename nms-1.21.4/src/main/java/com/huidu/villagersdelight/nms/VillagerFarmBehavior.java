@@ -32,7 +32,9 @@ import net.momirealms.craftengine.core.plugin.context.ContextHolder;
 import net.momirealms.craftengine.core.plugin.context.EventTrigger;
 import net.momirealms.craftengine.core.plugin.context.PlayerOptionalContext;
 import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
+import net.momirealms.craftengine.core.entity.player.InteractionHand;
 import net.momirealms.craftengine.core.util.Key;
+import net.momirealms.craftengine.core.util.Cancellable;
 import net.momirealms.craftengine.core.world.WorldPosition;
 import net.momirealms.craftengine.proxy.bukkit.craftbukkit.CraftWorldProxy;
 import net.momirealms.craftengine.proxy.minecraft.core.BlockPosProxy;
@@ -164,9 +166,10 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
                 boolean harvested = false;
                 if (fdCrop != null) {
                     if (CraftEventFactory.callEntityChangeBlockEvent(villager, this.aboveFarmlandPos, state.getFluidState().createLegacyBlock())) {
-                        this.harvestFdCrop(level, villager, this.aboveFarmlandPos, fdCrop);
-                        harvested = true;
-                        VillagersDelightPlugin.debug("harvest: " + fdCrop.blockId() + " at " + this.aboveFarmlandPos);
+                        harvested = this.harvestFdCrop(level, villager, this.aboveFarmlandPos, fdCrop);
+                        if (harvested) {
+                            VillagersDelightPlugin.debug("harvest: " + fdCrop.blockId() + " at " + this.aboveFarmlandPos);
+                        }
                     }
                 } else if (customCrop != null && customCrop.mature()) {
                     if (CraftEventFactory.callEntityChangeBlockEvent(villager, this.aboveFarmlandPos, state)) {
@@ -225,21 +228,21 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
         }
     }
 
-    private void harvestFdCrop(ServerLevel level, Villager villager, BlockPos pos, FDCrop crop) {
+    private boolean harvestFdCrop(ServerLevel level, Villager villager, BlockPos pos, FDCrop crop) {
         if (crop.harvestMode() == FDCrop.HarvestMode.TALL) {
             // Two-block crop: harvest only the mature upper half and reset the lower half so the
             // stalk regrows; the stalk itself is never removed.
             this.breakCeBlock(level, pos);
             this.resetLowerAfterUpperHarvest(level, pos.below(), crop);
-            return;
+            return true;
         }
         if (crop.harvestMode() == FDCrop.HarvestMode.PICK) {
             // Right-click style harvest (tomatoes): trigger the CE right-click event so the
             // configured pick loot drops and the vine resets to age 0 like a player interaction.
-            this.rightClickCeBlock(level, pos);
-            return;
+            return this.rightClickCeBlock(level, pos, crop);
         }
         this.breakCeBlock(level, pos);
+        return true;
     }
 
     private void resetLowerAfterUpperHarvest(ServerLevel level, BlockPos lowerPos, FDCrop crop) {
@@ -305,25 +308,31 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
 
     // Triggers the CE right-click event (use_on) on a custom block without a player, so PICK crops
     // drop their configured pick loot and reset to age 0 exactly like a player interaction.
-    private void rightClickCeBlock(ServerLevel level, BlockPos pos) {
+    private boolean rightClickCeBlock(ServerLevel level, BlockPos pos, FDCrop crop) {
         ImmutableBlockState ceState = this.ceStateAt(level, pos);
         if (ceState == null) {
-            return;
+            return false;
         }
         try {
             net.momirealms.craftengine.core.world.World ceWorld =
                     net.momirealms.craftengine.bukkit.api.BukkitAdaptor.adapt(level.getWorld());
             WorldPosition position = new WorldPosition(ceWorld,
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+            Cancellable event = Cancellable.dummy();
             PlayerOptionalContext context = PlayerOptionalContext.of(null, ContextHolder.builder()
                     .withParameter(DirectContextParameters.BLOCK,
                             new net.momirealms.craftengine.bukkit.world.BukkitExistingBlock(
                                     level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ())))
                     .withParameter(DirectContextParameters.POSITION, position)
-                    .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState));
+                    .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState)
+                    .withParameter(DirectContextParameters.HAND, InteractionHand.MAIN_HAND)
+                    .withParameter(DirectContextParameters.EVENT, event));
             ceState.owner().value().execute(context, EventTrigger.RIGHT_CLICK);
+            ImmutableBlockState after = this.ceStateAt(level, pos);
+            return !event.isCancelled() && after != null && !crop.isMature(after);
         } catch (Throwable t) {
             VillagersDelightPlugin.debug("harvest: CE right-click event failed at " + pos + ": " + t);
+            return false;
         }
     }
 

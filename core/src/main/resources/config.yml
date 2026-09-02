@@ -111,6 +111,3 @@ share-items:
   enabled: true
   items:
     - minecraft:wheat
-
-# 注入器重扫间隔（秒），用于对抗其他插件对村民的修改。
-rescan-seconds: 30

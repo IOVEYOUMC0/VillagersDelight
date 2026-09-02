@@ -29,8 +29,11 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     // view inventory; concurrent because open/click/close run on different players' region threads.
     private final java.util.Map<org.bukkit.inventory.Inventory, BackpackSession> openBackpackViews =
             new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Set<java.util.UUID> openBackpackVillagers =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    private record BackpackSession(org.bukkit.entity.Villager villager, org.bukkit.inventory.ItemStack[] snapshot) {
+    private record BackpackSession(org.bukkit.entity.Villager villager, java.util.UUID villagerId,
+                                   org.bukkit.inventory.ItemStack[] snapshot) {
     }
     // Configured seed/food identities (CE custom ids and vanilla material keys) villagers may pick up,
     // and the vanilla base materials VillagersDelight injected into the villager_picks_up tag for CE
@@ -83,8 +86,7 @@ public final class VillagersDelightPlugin extends JavaPlugin {
                 this.aiInjector = (VillagerAiInjector) nmsClass.getConstructor().newInstance();
                 this.aiInjector.install();
                 getLogger().info("VillagersDelight NMS layer installed: " + implementation);
-                // The onEnable reloadFromConfig above ran before the NMS layer existed, so pickup, share
-                // and compost all no-op'd. Re-apply the whole config now that the injector is present.
+                // Apply NMS-backed configuration after the injector is installed.
                 reloadFromConfig();
                 return;
             } catch (Throwable t) {
@@ -100,6 +102,11 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             this.aiInjector.shutdown();
             this.aiInjector = null;
         }
+        this.openBackpackViews.clear();
+        this.openBackpackVillagers.clear();
+        this.pickupIds = Set.of();
+        this.injectedBaseMaterials = Set.of();
+        instance = null;
     }
 
     private void registerCommands() {
@@ -135,12 +142,23 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             sender.sendMessage("[VillagersDelight] 只有玩家可以打开村民背包");
             return true;
         }
+        org.bukkit.Location playerLocation = player.getLocation();
+        int searchRadius = 6;
+        int interactionRadius = 10;
+        int minChunkX = ((int) Math.floor(playerLocation.getX() - interactionRadius)) >> 4;
+        int maxChunkX = ((int) Math.floor(playerLocation.getX() + interactionRadius)) >> 4;
+        int minChunkZ = ((int) Math.floor(playerLocation.getZ() - interactionRadius)) >> 4;
+        int maxChunkZ = ((int) Math.floor(playerLocation.getZ() + interactionRadius)) >> 4;
+        if (!org.bukkit.Bukkit.isOwnedByCurrentRegion(player.getWorld(), minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
+            sender.sendMessage("[VillagersDelight] 请远离区域边界后重试");
+            return true;
+        }
         org.bukkit.util.RayTraceResult result = player.rayTraceEntities(10, false);
         org.bukkit.entity.Villager villager = result != null && result.getHitEntity() instanceof org.bukkit.entity.Villager v
                 ? v : null;
         if (villager == null) {
             // Fall back to the nearest villager around the player.
-            villager = player.getWorld().getNearbyEntities(player.getLocation(), 6, 6, 6).stream()
+            villager = player.getWorld().getNearbyEntities(playerLocation, searchRadius, searchRadius, searchRadius).stream()
                     .filter(entity -> entity instanceof org.bukkit.entity.Villager)
                     .map(entity -> (org.bukkit.entity.Villager) entity)
                     .min(java.util.Comparator.comparingDouble(entity -> entity.getLocation().distanceSquared(player.getLocation())))
@@ -150,25 +168,41 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             sender.sendMessage("[VillagersDelight] 准星没有指向村民，附近也没有村民");
             return true;
         }
-        for (BackpackSession existing : this.openBackpackViews.values()) {
-            if (existing.villager().getUniqueId().equals(villager.getUniqueId())) {
-                sender.sendMessage("[VillagersDelight] 该村民的背包已被打开");
-                return true;
-            }
+        final org.bukkit.entity.Villager targetVillager = villager;
+        java.util.UUID villagerId = targetVillager.getUniqueId();
+        if (!this.openBackpackVillagers.add(villagerId)) {
+            sender.sendMessage("[VillagersDelight] 该村民的背包已被打开");
+            return true;
         }
-        // The villager inventory may have a size CraftContainer rejects, so copy it into a
-        // standard inventory view and write edits back when the view closes.
-        int villagerSize = villager.getInventory().getSize();
+        // Inventory state belongs to the villager's region. Build the view only after a snapshot has
+        // been captured there, then switch to the player's region for the inventory API calls.
+        targetVillager.getScheduler().run(this, task -> {
+            int villagerSize = targetVillager.getInventory().getSize();
+            org.bukkit.inventory.ItemStack[] snapshot = new org.bukkit.inventory.ItemStack[villagerSize];
+            for (int i = 0; i < villagerSize; i++) {
+                org.bukkit.inventory.ItemStack item = targetVillager.getInventory().getItem(i);
+                snapshot[i] = item == null ? null : item.clone();
+            }
+            player.getScheduler().run(this,
+                    playerTask -> openBackpackView(player, targetVillager, villagerId, snapshot),
+                    () -> openBackpackVillagers.remove(villagerId));
+        }, () -> {
+            openBackpackVillagers.remove(villagerId);
+            player.getScheduler().run(this,
+                    playerTask -> player.sendMessage("[VillagersDelight] 村民当前不可用"), null);
+        });
+        return true;
+    }
+
+    private void openBackpackView(org.bukkit.entity.Player player, org.bukkit.entity.Villager villager,
+                                  java.util.UUID villagerId, org.bukkit.inventory.ItemStack[] snapshot) {
+        int villagerSize = snapshot.length;
         int viewSize = Math.max(9, ((villagerSize + 8) / 9) * 9);
         org.bukkit.inventory.Inventory view = getServer().createInventory(null, viewSize, Component.text("村民背包"));
-        org.bukkit.inventory.ItemStack[] snapshot = new org.bukkit.inventory.ItemStack[villagerSize];
         for (int i = 0; i < villagerSize; i++) {
-            org.bukkit.inventory.ItemStack item = villager.getInventory().getItem(i);
-            snapshot[i] = item == null ? null : item.clone();
-            view.setItem(i, item);
+            view.setItem(i, snapshot[i]);
         }
-        // Lock the trailing slot added to fit a supported container size so players cannot use it.
-        if (viewSize > villager.getInventory().getSize()) {
+        if (viewSize > villagerSize) {
             org.bukkit.inventory.ItemStack placeholder = new org.bukkit.inventory.ItemStack(org.bukkit.Material.BARRIER);
             org.bukkit.inventory.meta.ItemMeta meta = placeholder.getItemMeta();
             if (meta != null) {
@@ -177,10 +211,9 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             }
             view.setItem(viewSize - 1, placeholder);
         }
-        this.openBackpackViews.put(view, new BackpackSession(villager, snapshot));
+        this.openBackpackViews.put(view, new BackpackSession(villager, villagerId, snapshot));
         player.openInventory(view);
-        sender.sendMessage("[VillagersDelight] 已打开村民背包，关闭界面时保存改动");
-        return true;
+        player.sendMessage("[VillagersDelight] 已打开村民背包，关闭界面时保存改动");
     }
 
     void reloadFromConfig() {
@@ -195,10 +228,9 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         getLogger().info("Crop index rebuilt: " + (registry == null ? 0 : registry.cropCount()) + " crops.");
     }
 
-    // Pickup coordination: the villager_picks_up data pack (PickupEnabler) is the only mechanism
-    // that makes wantsToPickUp accept the CE seeds' base materials. We deliberately do NOT rebuild
-    // the farmer profession registry entry here - replacing the VillagerProfession holder value made
-    // every farmer villager lose its profession outfit after a restart. The wanted-item sensor and
+    // Pickup coordination: the villager_picks_up data pack (PickupEnabler) makes wantsToPickUp accept
+    // CE seed base materials. Rebuilding the farmer profession registry entry is unsafe because replacing
+    // the VillagerProfession holder value strips farmer outfits after a restart. The wanted-item sensor and
     // pickup listener stay config-driven so villagers only walk to the configured seeds and fruit.
     private void augmentFarmerPickup(CropRegistry registry, VillagersDelightConfig cfg) {
         if (this.aiInjector == null) {
@@ -284,7 +316,7 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     // Passes the compost-items configuration to the NMS layer: villagers can compost the configured
     // CE items (matched by their CE custom id, never by base material) into bone meal. The vanilla
     // COMPOSTABLES table stays untouched, so base materials of CE items are not made compostable.
-    // Re-invoking replaces the previous set, so /vd reload applies edits immediately.
+    // Each call replaces the configured set, so /vd reload applies edits immediately.
     private void configureCompost(CropRegistry registry, VillagersDelightConfig cfg) {
         if (this.aiInjector == null) {
             return;
@@ -298,7 +330,7 @@ public final class VillagersDelightPlugin extends JavaPlugin {
 
     // Passes the share-items configuration to the NMS layer: villagers throw surplus configured
     // items (matched by CE custom id first, vanilla material key as fallback) at nearby villagers.
-    // Re-invoking replaces the previous set, so /vd reload applies edits immediately.
+    // Each call replaces the configured set, so /vd reload applies edits immediately.
     private void configureShareItems(CropRegistry registry, VillagersDelightConfig cfg) {
         if (this.aiInjector == null) {
             return;
@@ -335,14 +367,18 @@ public final class VillagersDelightPlugin extends JavaPlugin {
                     edited[i] = now == null ? null : now.clone();
                 }
             }
-            villager.getScheduler().run(VillagersDelightPlugin.this, task -> {
-                org.bukkit.inventory.Inventory inv = villager.getInventory();
-                for (int i = 0; i < size && i < inv.getSize(); i++) {
-                    if (changed[i]) {
-                        inv.setItem(i, edited[i]);
+        villager.getScheduler().run(VillagersDelightPlugin.this, task -> {
+                try {
+                    org.bukkit.inventory.Inventory inv = villager.getInventory();
+                    for (int i = 0; i < size && i < inv.getSize(); i++) {
+                        if (changed[i]) {
+                            inv.setItem(i, edited[i]);
+                        }
                     }
+                } finally {
+                    openBackpackVillagers.remove(session.villagerId());
                 }
-            }, null);
+            }, () -> openBackpackVillagers.remove(session.villagerId()));
         }
 
         @EventHandler(ignoreCancelled = true)
@@ -369,12 +405,11 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     }
 
     // Villagers pick items up passively in Mob.aiStep via wantsToPickUp (the villager_picks_up tag),
-    // never through the wanted-item sensor (villagers have no walk-to-wanted-item behavior). We appended
-    // CE seed/food base materials (e.g. nether brick, steak) to that tag so villagers would collect the
-    // CE items, but that also lets a plain vanilla item of the same base material leak into a villager's
-    // inventory. Cancel exactly those: an item whose base material we injected and whose identity is not
-    // a configured seed/food. Bread, real seeds and every other naturally-wanted vanilla item keep a base
-    // material we never injected, so they are untouched and vanilla pickup/breeding is preserved.
+    // never through the wanted-item sensor (villagers have no walk-to-wanted-item behavior). The tag includes
+    // CE seed/food base materials (e.g. nether brick, steak), which also admits vanilla items with the same
+    // material. Cancel items whose base material is injected but whose identity is not
+    // a configured seed/food. Bread, real seeds, and other naturally wanted vanilla items use non-injected
+    // base materials, so vanilla pickup and breeding remain intact.
     private final class PickupFilterListener implements Listener {
 
         @EventHandler(ignoreCancelled = true)

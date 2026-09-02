@@ -80,7 +80,7 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
     protected void start(ServerLevel level, Villager body, long timestamp) {
         this.setCurrentCropAsTarget(body);
         body.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BONE_MEAL));
-        this.nextWorkCycleTime = timestamp;
+        this.nextWorkCycleTime = timestamp + 20L;
         this.timeWorkedSoFar = 0;
     }
 

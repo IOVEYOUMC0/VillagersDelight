@@ -8,7 +8,6 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Tag;
 import org.bukkit.World;
-import org.bukkit.inventory.ItemStack;
 
 import java.io.File;
 import java.io.IOException;
@@ -48,9 +47,8 @@ public final class PickupEnabler {
         }
         List<Key> enabledCrops = config.pickupCrops();
         // The full set of base materials the configured seeds and foods want in the tag. Writing the
-        // complete set every time (rather than only the not-yet-tagged subset) keeps the data pack
-        // idempotent: {"replace":false} unions with vanilla, so re-listing a material vanilla already
-        // has is harmless, and no previously-injected material can be dropped.
+        // complete set every time keeps the data pack idempotent: {"replace":false} unions with vanilla,
+        // and re-listing a vanilla material is harmless.
         Set<Material> desired = new LinkedHashSet<>();
         for (FDCrop crop : registry.allCrops()) {
             if (!enabledCrops.isEmpty() && !enabledCrops.contains(crop.blockId())) {
@@ -97,7 +95,11 @@ public final class PickupEnabler {
             plugin.getLogger().warning("Pickup: failed to write " + root + "; villagers may not pick up CE seeds");
             return;
         }
-        plugin.getLogger().info("Pickup: wrote villager_picks_up tag " + desired + " (data pack, reloading)");
+        plugin.getLogger().info("Pickup: wrote villager_picks_up tag " + desired + " (data pack)");
+        if (isRegionizedServer()) {
+            plugin.getLogger().warning("Pickup: data pack written; runtime data reload is disabled on regionized servers. Restart the server to apply it");
+            return;
+        }
         Bukkit.getGlobalRegionScheduler().runDelayed(plugin, task -> {
             try {
                 Bukkit.reloadData();
@@ -210,5 +212,24 @@ public final class PickupEnabler {
         } catch (IOException e) {
             return false;
         }
+    }
+
+    private static boolean isRegionizedServer() {
+        String className = "io.papermc.paper.threadedregions.RegionizedServer";
+        ClassLoader[] loaders = {
+                PickupEnabler.class.getClassLoader(),
+                Thread.currentThread().getContextClassLoader(),
+                Bukkit.getServer() == null ? null : Bukkit.getServer().getClass().getClassLoader(),
+                ClassLoader.getSystemClassLoader()
+        };
+        for (ClassLoader loader : loaders) {
+            try {
+                Class.forName(className, false, loader);
+                return true;
+            } catch (ClassNotFoundException | LinkageError ignored) {
+                // Try the next loader; plugin and server classes may use different class loaders.
+            }
+        }
+        return false;
     }
 }

@@ -31,7 +31,6 @@ public final class VillagersDelightConfig {
     private final Set<Key> disabledCrops;
     private final Set<Key> extraSoils;
     private final Map<Key, List<ItemStack>> harvestDrops;
-    private final long rescanSeconds;
     private final boolean debug;
     private final boolean pickupEnabled;
     private final List<Key> pickupCrops;
@@ -46,7 +45,6 @@ public final class VillagersDelightConfig {
             Set<Key> disabledCrops,
             Set<Key> extraSoils,
             Map<Key, List<ItemStack>> harvestDrops,
-            long rescanSeconds,
             boolean pickupEnabled,
             List<Key> pickupCrops,
             List<Key> pickupFoods,
@@ -60,7 +58,6 @@ public final class VillagersDelightConfig {
         this.disabledCrops = disabledCrops;
         this.extraSoils = extraSoils;
         this.harvestDrops = harvestDrops;
-        this.rescanSeconds = rescanSeconds;
         this.pickupEnabled = pickupEnabled;
         this.pickupCrops = pickupCrops;
         this.pickupFoods = pickupFoods;
@@ -134,7 +131,6 @@ public final class VillagersDelightConfig {
                 disabled,
                 extraSoils,
                 drops,
-                yaml.getLong("rescan-seconds", 30L),
                 yaml.getBoolean("pickup.enabled", false),
                 pickupCrops,
                 pickupFoods,
@@ -202,9 +198,6 @@ public final class VillagersDelightConfig {
         return this.harvestDrops;
     }
 
-    public long rescanSeconds() {
-        return this.rescanSeconds;
-    }
 
     public boolean debug() {
         return this.debug;
