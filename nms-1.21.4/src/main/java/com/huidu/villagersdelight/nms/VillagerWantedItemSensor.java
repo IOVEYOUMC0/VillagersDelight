@@ -31,6 +31,7 @@ public final class VillagerWantedItemSensor extends NearestItemSensor {
         Optional<ItemEntity> target = items.stream()
                 .filter(item -> mob.wantsToPickUp(level, item.getItem()))
                 .filter(item -> isAllowed(item.getItem()))
+                .filter(item -> mob.hasLineOfSight(item))
                 .findFirst();
         brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_WANTED_ITEM, target);
     }

@@ -7,6 +7,7 @@ import net.momirealms.craftengine.core.util.Key;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.ai.behavior.Behavior;
+import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.item.ItemStack;
@@ -23,16 +24,13 @@ import java.util.Map;
 // being thrown, so they never drop as their underlying vanilla material.
 public final class VillagerShareItems extends Behavior<Villager> {
 
-    private static final int SCAN_RANGE = 6;
-    private static final int PICKUP_DELAY = 40;
-
     public VillagerShareItems() {
         super(Map.of());
     }
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, Villager villager) {
-        return NmsVillagerAi.SHARE_ENABLED && level.getRandom().nextFloat() < 0.1F;
+        return NmsVillagerAi.SHARE_ENABLED && level.getRandom().nextDouble() < NmsVillagerAi.SHARE_CHANCE;
     }
 
     @Override
@@ -41,14 +39,14 @@ public final class VillagerShareItems extends Behavior<Villager> {
         if (candidate == null) {
             return;
         }
-        // Share the surplus above half a stack in one throw, gated on the giver's OWN count against a fixed
+        // Share only the surplus above half a stack in one throw, gated on the giver's OWN count against a fixed
         // floor. removeItem shrinks the giver immediately, so it drops below the floor after one throw and
         // stops qualifying next tick — self-limiting, no cooldown, and never a dump-to-1.
-        int keep = candidate.maxStackSize() / 2;
+        int keep = (int) Math.floor(candidate.maxStackSize() * NmsVillagerAi.SHARE_KEEP_FRACTION);
         if (candidate.count() <= keep) {
             return;
         }
-        int amount = candidate.count() / 2;
+        int amount = candidate.count() - keep;
         ItemStack probe = rebuildIfCustom(villager.getInventory().getItem(candidate.slot()).copy(), candidate.customId());
         probe.setCount(amount);
         Villager receiver = findReceiver(level, villager, candidate, probe);
@@ -60,10 +58,7 @@ public final class VillagerShareItems extends Behavior<Villager> {
             return;
         }
         ItemStack stack = rebuildIfCustom(removed, candidate.customId());
-        ItemEntity item = new ItemEntity(level, villager.getX(), villager.getEyeY() - 0.3, villager.getZ(), stack);
-        item.setThrower(villager);
-        item.setPickUpDelay(PICKUP_DELAY);
-        level.addFreshEntity(item);
+        BehaviorUtils.throwItem(villager, stack, receiver.position());
     }
 
     // Finds a configured item held in surplus (count > 1) without removing it. A CE stack matches
@@ -94,16 +89,17 @@ public final class VillagerShareItems extends Behavior<Villager> {
     // recipient. Runs on the villager's own region thread; the 6-block scan stays within the current region
     // so reading neighbour inventories here is Folia-safe.
     private Villager findReceiver(ServerLevel level, Villager villager, ShareCandidate candidate, ItemStack giveStack) {
-        int keep = candidate.maxStackSize() / 2;
+        int keep = (int) Math.floor(candidate.maxStackSize() * NmsVillagerAi.SHARE_KEEP_FRACTION);
         Location center = new Location(level.getWorld(), villager.getX(), villager.getY(), villager.getZ());
-        int minChunkX = ((int) Math.floor(center.getX() - SCAN_RANGE)) >> 4;
-        int maxChunkX = ((int) Math.floor(center.getX() + SCAN_RANGE)) >> 4;
-        int minChunkZ = ((int) Math.floor(center.getZ() - SCAN_RANGE)) >> 4;
-        int maxChunkZ = ((int) Math.floor(center.getZ() + SCAN_RANGE)) >> 4;
+        double range = NmsVillagerAi.SHARE_RANGE;
+        int minChunkX = ((int) Math.floor(center.getX() - range)) >> 4;
+        int maxChunkX = ((int) Math.floor(center.getX() + range)) >> 4;
+        int minChunkZ = ((int) Math.floor(center.getZ() - range)) >> 4;
+        int maxChunkZ = ((int) Math.floor(center.getZ() + range)) >> 4;
         if (!org.bukkit.Bukkit.isOwnedByCurrentRegion(level.getWorld(), minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
             return null;
         }
-        for (org.bukkit.entity.Entity entity : level.getWorld().getNearbyEntities(center, SCAN_RANGE, SCAN_RANGE, SCAN_RANGE)) {
+        for (org.bukkit.entity.Entity entity : level.getWorld().getNearbyEntities(center, range, range, range)) {
             if (!(entity instanceof org.bukkit.entity.Villager other)
                     || !org.bukkit.Bukkit.isOwnedByCurrentRegion(other)
                     || other.getUniqueId().equals(villager.getUUID())) {

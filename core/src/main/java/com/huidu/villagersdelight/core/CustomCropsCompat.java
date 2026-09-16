@@ -69,12 +69,18 @@ public final class CustomCropsCompat {
             int point = ((Number) a.cropPoint.invoke(type, state)).intValue();
             int max = ((Number) a.maxPoints.invoke(config)).intValue();
             return new State(point, max);
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return null;
         }
     }
 
     @Nullable
+    /** True when CustomCrops is present and enabled. Callers use it to skip building an argument that
+     *  every entry point would immediately throw away. */
+    public static boolean isAvailable() {
+        return getAccess() != null;
+    }
+
     public static String cropId(ItemStack item) {
         Access a = getAccess();
         if (a == null || item == null || item.getType().isAir()) {
@@ -94,7 +100,7 @@ public final class CustomCropsCompat {
                 return null;
             }
             return String.valueOf(a.configId.invoke(config));
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return null;
         }
     }
@@ -109,7 +115,7 @@ public final class CustomCropsCompat {
             Object itemManager = a.itemManager();
             String blockId = String.valueOf(a.blockId.invoke(itemManager, location.clone().subtract(0, 1, 0).getBlock()));
             return lookup(a.potRegistry, blockId) != null;
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return false;
         }
     }
@@ -133,7 +139,7 @@ public final class CustomCropsCompat {
             Object potId = a.potConfigId.invoke(pot);
             Object whitelist = a.potWhitelist.invoke(config);
             return whitelist instanceof java.util.Set<?> set && set.contains(potId);
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return false;
         }
     }
@@ -146,7 +152,7 @@ public final class CustomCropsCompat {
         try {
             Object api = a.api();
             return api != null && Boolean.TRUE.equals(a.placeCrop.invoke(api, location, cropId, 0));
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return false;
         }
     }
@@ -164,7 +170,7 @@ public final class CustomCropsCompat {
             Object reason = a.breakReason.getField("BREAK").get(null);
             a.breakCrop.invoke(api, null, null, location, reason);
             return stateAt(location.getWorld(), location.getBlockX(), location.getBlockY(), location.getBlockZ()) == null;
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return false;
         }
     }
@@ -202,13 +208,17 @@ public final class CustomCropsCompat {
         }
         Plugin plugin = Bukkit.getPluginManager().getPlugin("CustomCrops");
         if (plugin == null || !plugin.isEnabled()) {
+            // CustomCrops is declared as a load-BEFORE dependency, so it is either present when this
+            // plugin enables or not at all. Remember the absence rather than repeating the plugin
+            // manager lookup for every block the villager farm scan looks at.
+            unavailable = true;
             return null;
         }
         try {
             Access created = new Access(plugin.getClass().getClassLoader());
             access = created;
             return created;
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             unavailable = true;
             return null;
         }

@@ -1,7 +1,9 @@
 package com.huidu.villagersdelight.impl26;
 
 import com.huidu.villagersdelight.core.VillagerAiInjector;
+import com.huidu.villagersdelight.core.VillagersDelightConfig;
 import com.huidu.villagersdelight.core.VillagersDelightPlugin;
+import com.huidu.villagersdelight.core.CeItemAccess;
 import net.minecraft.world.entity.ai.Brain;
 import net.minecraft.world.entity.ai.behavior.BehaviorControl;
 import net.minecraft.world.entity.ai.behavior.GateBehavior;
@@ -28,10 +30,10 @@ import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.VillagerCareerChangeEvent;
 import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,11 +52,23 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     static volatile Set<String> ALLOWED_SEEDS = Set.of();
     static volatile boolean SHARE_ENABLED = false;
     static volatile Set<String> SHARE_IDS = Set.of();
-    static volatile Set<Item> FOOD_ITEMS = Set.of();
+    static volatile Set<String> FOOD_IDS = Set.of();
     /** CE item ids villagers may compost (VillagerWorkAtComposter); the vanilla table is untouched. */
     static volatile Set<String> COMPOST_IDS = Set.of();
     /** Compost success probability for CE items without a vanilla table entry. */
     static volatile float COMPOST_CHANCE = 0.3F;
+    static volatile boolean FOOD_ENABLED = true;
+    static volatile double FOOD_CHECK_CHANCE = 0.05;
+    static volatile int COMPOST_MAX_ITEMS = 20;
+    static volatile int COMPOST_MINIMUM_KEPT = 32;
+    static volatile double SHARE_CHANCE = 0.1;
+    static volatile double SHARE_RANGE = 6.0;
+    static volatile double SHARE_KEEP_FRACTION = 0.5;
+    static volatile int BONEMEAL_RETRY_DELAY = 40;
+    static volatile int BONEMEAL_WORK_DURATION = 80;
+    static volatile int FARM_RETARGET_DELAY = 20;
+    static volatile int FARM_STOP_COOLDOWN = 40;
+    static volatile int FARM_WORK_DURATION = 200;
     private static final Field GATE_BEHAVIORS = findField(GateBehavior.class, "behaviors");
     private static final Field SHUFFLING_ENTRIES = findField(ShufflingList.class, "entries");
     private static final Constructor<?> WEIGHTED_ENTRY_CTOR = findWeightedEntryConstructor();
@@ -108,18 +122,9 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             return;
         }
         try {
-            Set<Item> foods = new HashSet<>();
-            if (itemIds != null) {
-                for (String id : itemIds) {
-                    Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(id));
-                    if (item != null && !Villager.FOOD_POINTS.containsKey(item)) {
-                        foods.add(item);
-                    }
-                }
-            }
-            FOOD_ITEMS = Set.copyOf(foods);
+            FOOD_IDS = itemIds == null ? Set.of() : Set.copyOf(itemIds);
             VillagersDelightPlugin.debug("pickup: configured villager food items=" + itemIds);
-        } catch (Throwable t) {
+        } catch (RuntimeException | LinkageError t) {
             this.plugin.getLogger().warning("Failed to configure villager food items: " + t);
         }
     }
@@ -128,6 +133,23 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     public void configureCeCompost(java.util.Set<String> ceItemIds) {
         COMPOST_IDS = ceItemIds == null ? Set.of() : Set.copyOf(ceItemIds);
         VillagersDelightPlugin.debug("compost: villager CE compost items set to " + COMPOST_IDS);
+    }
+
+    @Override
+    public void configureBehavior(VillagersDelightConfig.BehaviorSettings settings) {
+        FOOD_ENABLED = settings.foodEnabled();
+        FOOD_CHECK_CHANCE = settings.foodCheckChance();
+        COMPOST_MAX_ITEMS = settings.compostMaxItemsPerWork();
+        COMPOST_MINIMUM_KEPT = settings.compostMinimumKeptPerItem();
+        COMPOST_CHANCE = (float) settings.compostDefaultChance();
+        SHARE_CHANCE = settings.sharingChance();
+        SHARE_RANGE = settings.sharingRange();
+        SHARE_KEEP_FRACTION = settings.sharingKeepFraction();
+        BONEMEAL_RETRY_DELAY = settings.bonemealRetryDelayTicks();
+        BONEMEAL_WORK_DURATION = settings.bonemealWorkDurationTicks();
+        FARM_RETARGET_DELAY = settings.farmRetargetDelayTicks();
+        FARM_STOP_COOLDOWN = settings.farmStopCooldownTicks();
+        FARM_WORK_DURATION = settings.farmWorkDurationTicks();
     }
 
     @Override
@@ -197,6 +219,14 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                     .filter(java.util.Objects::nonNull)
                     .flatMap(Set::stream)
                     .anyMatch(VillagerConfiguredFood.class::isInstance);
+            // Activity.CORE is registered under several priorities, each with its OWN set. Checking only
+            // the set being iterated would install one share behavior per priority (7-8 per farmer), each
+            // rolling its own chance every tick. Scan across priorities exactly like the food check above.
+            boolean shareBehaviorInstalled = byPriority.values().stream()
+                    .map(activities -> activities.get(Activity.CORE))
+                    .filter(java.util.Objects::nonNull)
+                    .flatMap(Set::stream)
+                    .anyMatch(VillagerShareItems.class::isInstance);
 
             if (farmer) {
                 // Install the rich-soil aware secondary-POI sensor so a pure CE farm populates SECONDARY_JOB_SITE.
@@ -222,8 +252,9 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                         core.add(new VillagerConfiguredFood());
                         foodBehaviorInstalled = true;
                     }
-                    if (farmer && core.stream().noneMatch(c -> c instanceof VillagerShareItems)) {
+                    if (farmer && !shareBehaviorInstalled) {
                         core.add(new VillagerShareItems());
+                        shareBehaviorInstalled = true;
                     }
                 }
                 if (!farmer) {
@@ -251,8 +282,11 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             if (replaced > 0) {
                 VillagersDelightPlugin.debug("farm: installed at " + bukkitVillager.getLocation() + " replaced=" + replaced);
             }
-        } catch (IllegalAccessException e) {
-            this.plugin.getLogger().warning("Failed to replace villager farm behavior: " + e.getMessage());
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError t) {
+            // Catches Error too: a version mismatch surfaces as NoClassDefFoundError the first time an
+            // injected behavior is constructed, and letting that escape aborts the entity-load handler
+            // for every chunk that contains a villager.
+            this.plugin.getLogger().warning("Failed to replace villager farm behavior: " + t);
         }
     }
 
@@ -264,17 +298,17 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
         @Override
         protected boolean checkExtraStartConditions(ServerLevel level, Villager villager) {
-            return !FOOD_ITEMS.isEmpty()
-                    && level.getRandom().nextInt(20) == 0
+            return !FOOD_IDS.isEmpty()
+                    && FOOD_ENABLED && level.getRandom().nextDouble() < FOOD_CHECK_CHANCE
                     && villager.getAge() == 0
                     && !villager.isSleeping()
-                    && availableFoodPoints(villager) < Villager.BREEDING_FOOD_THRESHOLD;
+                    && foodLevel(villager) < Villager.BREEDING_FOOD_THRESHOLD
+                    && hasConfiguredNonVanillaFood(villager);
         }
 
         @Override
         protected void start(ServerLevel level, Villager villager, long gameTime) {
-            int points = availableFoodPoints(villager);
-            int needed = Villager.BREEDING_FOOD_THRESHOLD - points;
+            int needed = Villager.BREEDING_FOOD_THRESHOLD - foodLevel(villager);
             if (needed <= 0) {
                 return;
             }
@@ -282,7 +316,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             int consumed = 0;
             for (int slot = 0; slot < inventory.getContainerSize() && consumed < needed; slot++) {
                 ItemStack stack = inventory.getItem(slot);
-                if (FOOD_ITEMS.contains(stack.getItem())) {
+                if (isConfiguredCustomFood(stack)) {
                     int amount = Math.min(stack.getCount(), needed - consumed);
                     inventory.removeItem(slot, amount);
                     consumed += amount;
@@ -293,13 +327,27 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             }
         }
 
-        private static int availableFoodPoints(Villager villager) {
+        private static boolean hasConfiguredNonVanillaFood(Villager villager) {
             SimpleContainer inventory = villager.getInventory();
-            int points = foodLevel(villager);
-            for (Map.Entry<Item, Integer> food : Villager.FOOD_POINTS.entrySet()) {
-                points += inventory.countItem(food.getKey()) * food.getValue();
+            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                if (isConfiguredCustomFood(stack)) {
+                    return true;
+                }
             }
-            return points;
+            return false;
+        }
+
+        private static boolean isConfiguredCustomFood(ItemStack stack) {
+            return FOOD_IDS.contains(foodId(stack))
+                    && (CeItemAccess.customItemId(CraftItemStack.asBukkitCopy(stack)) != null
+                    || !Villager.FOOD_POINTS.containsKey(stack.getItem()));
+        }
+
+        private static String foodId(ItemStack stack) {
+            org.bukkit.inventory.ItemStack bukkit = CraftItemStack.asBukkitCopy(stack);
+            var custom = CeItemAccess.customItemId(bukkit);
+            return custom != null ? custom.toString() : bukkit.getType().getKey().toString();
         }
 
         private static int foodLevel(Villager villager) {

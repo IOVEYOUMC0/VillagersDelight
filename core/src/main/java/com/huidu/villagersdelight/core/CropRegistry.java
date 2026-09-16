@@ -18,7 +18,7 @@ import java.util.Set;
 
 // Snapshot of the configured CE crops the villager AI should harvest and plant. Built from the
 // explicit crop list in config.yml (no auto-detection); each entry must resolve to a loaded CE
-// block with an "age" property. The lookup paths used by the NMS layer are O(1): one
+// block with an "age", "growth", or "stage" property. The lookup paths used by the NMS layer are O(1): one
 // instanceof against DelegatingBlockState plus a map get.
 public final class CropRegistry {
 
@@ -27,11 +27,20 @@ public final class CropRegistry {
     private final Map<Key, FDCrop> crops;
     private final Set<Key> extraSoils;
     private final Map<Key, List<ItemStack>> harvestDrops;
+    // Derived indexes. The villager farm scan asks these questions once per scanned cell, and every
+    // input is fixed for the lifetime of a snapshot, so they are built once instead of scanned linearly.
+    private final Map<Key, FDCrop> cropsBySeed;
+    private final List<FDCrop> waterCrops;
+    private final Set<Key> plantableSoils;
 
-    private CropRegistry(Map<Key, FDCrop> crops, Set<Key> extraSoils, Map<Key, List<ItemStack>> harvestDrops) {
+    private CropRegistry(Map<Key, FDCrop> crops, Set<Key> extraSoils, Map<Key, List<ItemStack>> harvestDrops,
+                         Map<Key, FDCrop> cropsBySeed, List<FDCrop> waterCrops, Set<Key> plantableSoils) {
         this.crops = crops;
         this.extraSoils = extraSoils;
         this.harvestDrops = harvestDrops;
+        this.cropsBySeed = cropsBySeed;
+        this.waterCrops = waterCrops;
+        this.plantableSoils = plantableSoils;
     }
 
     public static void reload(VillagersDelightPlugin plugin) {
@@ -77,12 +86,7 @@ public final class CropRegistry {
         if (reg == null || seedItem == null) {
             return null;
         }
-        for (FDCrop crop : reg.crops.values()) {
-            if (seedItem.equals(crop.seedItem())) {
-                return crop;
-            }
-        }
-        return null;
+        return reg.cropsBySeed.get(seedItem);
     }
 
     // Whether the CE soil block below a planting spot is allowed for the given crop. Vanilla
@@ -102,16 +106,7 @@ public final class CropRegistry {
         if (reg == null || belowState == null) {
             return false;
         }
-        Key id = belowState.owner().value().id();
-        if (reg.extraSoils.contains(id)) {
-            return true;
-        }
-        for (FDCrop crop : reg.crops.values()) {
-            if (crop.soils().contains(id)) {
-                return true;
-            }
-        }
-        return false;
+        return reg.plantableSoils.contains(belowState.owner().value().id());
     }
 
     // All configured crops that plant on a fluid (water configured). Used to match a fluid spot
@@ -121,18 +116,7 @@ public final class CropRegistry {
         if (reg == null) {
             return List.of();
         }
-        List<FDCrop> result = new ArrayList<>();
-        for (FDCrop crop : reg.crops.values()) {
-            if (crop.water() != null) {
-                result.add(crop);
-            }
-        }
-        return result;
-    }
-
-        @Nullable
-    public List<ItemStack> dropsFor(Key cropId) {
-        return this.harvestDrops.get(cropId);
+        return reg.waterCrops;
     }
 
     public int cropCount() {
@@ -155,11 +139,11 @@ public final class CropRegistry {
                 VillagersDelightPlugin.debug("crop " + id + " skipped: CE block not loaded");
                 continue;
             }
-            if (!definition.hasProperty("age")) {
-                VillagersDelightPlugin.debug("crop " + id + " skipped: no age property");
+            Property<?> ageProperty = findAgeProperty(definition);
+            if (ageProperty == null) {
+                VillagersDelightPlugin.debug("crop " + id + " skipped: no numeric age/growth/stage property");
                 continue;
             }
-            Property<?> ageProperty = definition.getProperty("age");
             int ageMax = maxOf(ageProperty);
             boolean hasHalf = definition.hasProperty("half");
             Set<Key> soils = new HashSet<>(entry.getValue().soils());
@@ -167,7 +151,20 @@ public final class CropRegistry {
             crops.put(id, new FDCrop(id, ageMax, hasHalf, entry.getValue().seed(), soils, parseHarvestMode(entry.getValue().harvestMode()), entry.getValue().water(), entry.getValue().plantBlock()));
             VillagersDelightPlugin.debug("crop " + id + " registered (age max " + ageMax + ", seed " + entry.getValue().seed() + ", soils " + soils + ")");
         }
-        return new CropRegistry(crops, cfg.extraSoils(), cfg.harvestDrops());
+        Map<Key, FDCrop> bySeed = new HashMap<>();
+        List<FDCrop> water = new ArrayList<>();
+        Set<Key> soilIndex = new HashSet<>(cfg.extraSoils());
+        for (FDCrop crop : crops.values()) {
+            if (crop.seedItem() != null) {
+                bySeed.putIfAbsent(crop.seedItem(), crop);
+            }
+            if (crop.water() != null) {
+                water.add(crop);
+            }
+            soilIndex.addAll(crop.soils());
+        }
+        return new CropRegistry(crops, cfg.extraSoils(), cfg.harvestDrops(),
+                Map.copyOf(bySeed), List.copyOf(water), Set.copyOf(soilIndex));
     }
 
     private static int maxOf(Property<?> property) {
@@ -178,6 +175,20 @@ public final class CropRegistry {
             }
         }
         return max;
+    }
+
+    @Nullable
+    private static Property<?> findAgeProperty(BlockDefinition definition) {
+        for (String name : new String[]{"age", "growth", "stage"}) {
+            if (!definition.hasProperty(name)) {
+                continue;
+            }
+            Property<?> property = definition.getProperty(name);
+            if (property != null && maxOf(property) > 0) {
+                return property;
+            }
+        }
+        return null;
     }
 
     private static FDCrop.HarvestMode parseHarvestMode(String raw) {

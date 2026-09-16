@@ -96,7 +96,13 @@ public final class FDCrop {
 
     @Nullable
     private static Property<Integer> ageProperty(ImmutableBlockState state) {
-        return BlockBehaviorFactory.getOptionalProperty(state.owner().value(), "age", Integer.class);
+        for (String name : new String[]{"age", "growth", "stage"}) {
+            Property<Integer> property = BlockBehaviorFactory.getOptionalProperty(state.owner().value(), name, Integer.class);
+            if (property != null) {
+                return property;
+            }
+        }
+        return null;
     }
 
     public boolean isMature(ImmutableBlockState state) {

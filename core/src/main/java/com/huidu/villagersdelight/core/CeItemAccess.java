@@ -1,6 +1,7 @@
 package com.huidu.villagersdelight.core;
 
 import net.momirealms.craftengine.bukkit.api.CraftEngineItems;
+import net.momirealms.craftengine.bukkit.item.BukkitItemDefinition;
 import net.momirealms.craftengine.core.util.Key;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.Nullable;
@@ -23,5 +24,16 @@ public final class CeItemAccess {
     public static boolean isItem(ItemStack stack, Key itemId) {
         Key id = customItemId(stack);
         return id != null && id.equals(itemId);
+    }
+
+    // CraftEngine's configured compost_probability, or null for vanilla items.
+    @Nullable
+    public static Float compostProbability(ItemStack stack) {
+        Key id = customItemId(stack);
+        if (id == null) {
+            return null;
+        }
+        BukkitItemDefinition definition = CraftEngineItems.byItemStack(stack);
+        return definition == null ? null : definition.settings().compostProbability();
     }
 }

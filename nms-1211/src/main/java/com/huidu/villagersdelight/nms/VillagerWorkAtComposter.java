@@ -33,9 +33,6 @@ import java.util.Set;
 // custom id, reproducing the vanilla fill logic against the real composter block.
 public final class VillagerWorkAtComposter extends WorkAtComposter {
 
-    private static final int MAX_ITEMS_PER_WORK = 20;
-    private static final int MIN_STACK_KEPT = 10;
-
     @Override
     protected void useWorkstation(ServerLevel level, Villager body) {
         Optional<GlobalPos> jobSite = body.getBrain().getMemory(MemoryModuleType.JOB_SITE);
@@ -57,7 +54,7 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
         if (blockState.getValue(ComposterBlock.LEVEL) == 8) {
             blockState = ComposterBlock.extractProduce(body, blockState, level, pos);
         }
-        int totalItemsToUse = MAX_ITEMS_PER_WORK;
+        int totalItemsToUse = NmsVillagerAi.COMPOST_MAX_ITEMS;
         SimpleContainer inventory = body.getInventory();
         Map<String, Integer> itemsSeen = new HashMap<>();
         BlockState tempState = blockState;
@@ -67,7 +64,7 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
                 continue;
             }
             int totalItemCount = itemsSeen.merge(compostId(stack), stack.getCount(), Integer::sum);
-            int itemsToUse = Math.min(Math.min(totalItemCount - MIN_STACK_KEPT, totalItemsToUse), stack.getCount());
+            int itemsToUse = Math.min(Math.min(totalItemCount - NmsVillagerAi.COMPOST_MINIMUM_KEPT, totalItemsToUse), stack.getCount());
             if (itemsToUse <= 0) {
                 continue;
             }
@@ -139,8 +136,9 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
     }
 
     private static float compostChance(ItemStack stack) {
-        if (CeItemAccess.customItemId(CraftItemStack.asBukkitCopy(stack)) != null) {
-            return NmsVillagerAi.COMPOST_CHANCE;
+        Float configured = CeItemAccess.compostProbability(CraftItemStack.asBukkitCopy(stack));
+        if (configured != null) {
+            return Math.max(0.0F, Math.min(1.0F, configured));
         }
         Object2FloatMap<ItemLike> table = ComposterBlock.COMPOSTABLES;
         if (table.containsKey(stack.getItem())

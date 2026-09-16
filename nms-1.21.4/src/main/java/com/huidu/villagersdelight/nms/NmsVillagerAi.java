@@ -1,14 +1,14 @@
 package com.huidu.villagersdelight.impl214;
 
 import com.huidu.villagersdelight.core.VillagerAiInjector;
+import com.huidu.villagersdelight.core.VillagersDelightConfig;
 import com.huidu.villagersdelight.core.VillagersDelightPlugin;
+import com.huidu.villagersdelight.core.CeItemAccess;
 import net.minecraft.world.entity.ai.Brain;
 import net.minecraft.world.entity.ai.behavior.BehaviorControl;
 import net.minecraft.world.entity.ai.behavior.GateBehavior;
 import net.minecraft.world.entity.ai.behavior.HarvestFarmland;
 import net.minecraft.world.entity.ai.behavior.ShufflingList;
-import net.minecraft.world.entity.ai.behavior.WorkAtComposter;
-import net.minecraft.world.entity.ai.behavior.UseBonemeal;
 import net.minecraft.world.entity.ai.sensing.SensorType;
 import net.minecraft.world.entity.schedule.Activity;
 import net.minecraft.world.entity.npc.Villager;
@@ -17,6 +17,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.ai.behavior.Behavior;
+import net.minecraft.world.entity.ai.behavior.WorkAtComposter;
+import net.minecraft.world.entity.ai.behavior.UseBonemeal;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.bukkit.Bukkit;
@@ -27,30 +29,45 @@ import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.VillagerCareerChangeEvent;
 import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-// Replaces vanilla HarvestFarmland in farmer brains with VillagerFarmBehavior. Runs on spawn
-// (covers cured zombie villagers) and when a chunk loads. All handlers run on the entity's owning region. The
-// farm behavior lives inside the WORK RunOne (a GateBehavior): the replacement descends into
-// every gate's ShufflingList and swaps the entry while keeping its weight.
+// Replaces the vanilla HarvestFarmland behavior in farmer-villager brains with
+// VillagerFarmBehavior. Replacement happens on spawn (covers cured zombie villagers too)
+// and when a chunk loads. All handlers run on the entity's owning region.
+// 26.x stores behaviors per priority: Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>
+// in Brain.availableBehaviorsByPriority. The farm behavior lives inside the WORK
+// RunOne (a GateBehavior), so the replacement descends into every gate's
+// ShufflingList and swaps the entry while keeping its weight.
 public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
-    private static final Field AVAILABLE_BEHAVIORS = findField(Brain.class, "availableBehaviors");
+    private static final Field AVAILABLE_BEHAVIORS_BY_PRIORITY = findField(Brain.class, "availableBehaviorsByPriority");
 
     static volatile Set<String> ALLOWED_SEEDS = Set.of();
     static volatile boolean SHARE_ENABLED = false;
     static volatile Set<String> SHARE_IDS = Set.of();
-    static volatile Set<Item> FOOD_ITEMS = Set.of();
+    static volatile Set<String> FOOD_IDS = Set.of();
     /** CE item ids villagers may compost (VillagerWorkAtComposter); the vanilla table is untouched. */
     static volatile Set<String> COMPOST_IDS = Set.of();
     /** Compost success probability for CE items without a vanilla table entry. */
     static volatile float COMPOST_CHANCE = 0.3F;
+    static volatile boolean FOOD_ENABLED = true;
+    static volatile double FOOD_CHECK_CHANCE = 0.05;
+    static volatile int COMPOST_MAX_ITEMS = 20;
+    static volatile int COMPOST_MINIMUM_KEPT = 32;
+    static volatile double SHARE_CHANCE = 0.1;
+    static volatile double SHARE_RANGE = 6.0;
+    static volatile double SHARE_KEEP_FRACTION = 0.5;
+    static volatile int BONEMEAL_RETRY_DELAY = 40;
+    static volatile int BONEMEAL_WORK_DURATION = 80;
+    static volatile int FARM_RETARGET_DELAY = 20;
+    static volatile int FARM_STOP_COOLDOWN = 40;
+    static volatile int FARM_WORK_DURATION = 200;
     private static final Field GATE_BEHAVIORS = findField(GateBehavior.class, "behaviors");
     private static final Field SHUFFLING_ENTRIES = findField(ShufflingList.class, "entries");
     private static final Constructor<?> WEIGHTED_ENTRY_CTOR = findWeightedEntryConstructor();
@@ -104,22 +121,9 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             return;
         }
         try {
-            Set<Item> foods = new HashSet<>();
-            if (itemIds != null) {
-                for (String id : itemIds) {
-                    ResourceLocation loc = ResourceLocation.tryParse(id);
-                    if (loc == null) {
-                        continue;
-                    }
-                    Item item = BuiltInRegistries.ITEM.getValue(loc);
-                    if (item != null && !Villager.FOOD_POINTS.containsKey(item)) {
-                        foods.add(item);
-                    }
-                }
-            }
-            FOOD_ITEMS = Set.copyOf(foods);
+            FOOD_IDS = itemIds == null ? Set.of() : Set.copyOf(itemIds);
             VillagersDelightPlugin.debug("pickup: configured villager food items=" + itemIds);
-        } catch (Throwable t) {
+        } catch (RuntimeException | LinkageError t) {
             this.plugin.getLogger().warning("Failed to configure villager food items: " + t);
         }
     }
@@ -128,6 +132,23 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     public void configureCeCompost(java.util.Set<String> ceItemIds) {
         COMPOST_IDS = ceItemIds == null ? Set.of() : Set.copyOf(ceItemIds);
         VillagersDelightPlugin.debug("compost: villager CE compost items set to " + COMPOST_IDS);
+    }
+
+    @Override
+    public void configureBehavior(VillagersDelightConfig.BehaviorSettings settings) {
+        FOOD_ENABLED = settings.foodEnabled();
+        FOOD_CHECK_CHANCE = settings.foodCheckChance();
+        COMPOST_MAX_ITEMS = settings.compostMaxItemsPerWork();
+        COMPOST_MINIMUM_KEPT = settings.compostMinimumKeptPerItem();
+        COMPOST_CHANCE = (float) settings.compostDefaultChance();
+        SHARE_CHANCE = settings.sharingChance();
+        SHARE_RANGE = settings.sharingRange();
+        SHARE_KEEP_FRACTION = settings.sharingKeepFraction();
+        BONEMEAL_RETRY_DELAY = settings.bonemealRetryDelayTicks();
+        BONEMEAL_WORK_DURATION = settings.bonemealWorkDurationTicks();
+        FARM_RETARGET_DELAY = settings.farmRetargetDelayTicks();
+        FARM_STOP_COOLDOWN = settings.farmStopCooldownTicks();
+        FARM_WORK_DURATION = settings.farmWorkDurationTicks();
     }
 
     @Override
@@ -187,80 +208,87 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         try {
             Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) bukkitVillager).getHandle();
             Brain<Villager> brain = handle.getBrain();
-            Map<Activity, ShufflingList<BehaviorControl<?>>> behaviors =
-                    (Map<Activity, ShufflingList<BehaviorControl<?>>>) AVAILABLE_BEHAVIORS.get(brain);
-            boolean farmer = bukkitVillager.getProfession() == org.bukkit.entity.Villager.Profession.FARMER;
-            this.installCoreBehaviors(behaviors, farmer);
-            if (!farmer) {
-                return;
-            }
-            ShufflingList<BehaviorControl<?>> farm = behaviors.get(Activity.WORK);
-            if (farm == null) {
-                VillagersDelightPlugin.debug("replace: no WORK behavior list");
+            Map<Integer, Map<Activity, Set<BehaviorControl<?>>>> byPriority =
+                    (Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>) AVAILABLE_BEHAVIORS_BY_PRIORITY.get(brain);
+            if (byPriority == null) {
+                VillagersDelightPlugin.debug("replace: brain has no availableBehaviorsByPriority");
                 return;
             }
 
-            @SuppressWarnings("unchecked")
-            List<ShufflingList.WeightedEntry<?>> entries = (List<ShufflingList.WeightedEntry<?>>) SHUFFLING_ENTRIES.get(farm);
-            List<String> controlNames = entries.stream().map(e -> this.describe(((ShufflingList.WeightedEntry<?>) e).getData())).toList();
-            // Install the extra-soil aware secondary-POI sensor so a pure CE farm populates SECONDARY_JOB_SITE.
-            try {
-                Map<Object, Object> sensors = (Map<Object, Object>) BRAIN_SENSORS.get(brain);
-                // Keep the sensor replacement idempotent for repeated entity lifecycle events.
-                if (!(sensors.get(SensorType.SECONDARY_POIS) instanceof VillagerSecondaryPoiSensor)) {
-                    sensors.put(SensorType.SECONDARY_POIS, new VillagerSecondaryPoiSensor());
+            boolean farmer = bukkitVillager.getProfession() == org.bukkit.entity.Villager.Profession.FARMER;
+            boolean foodBehaviorInstalled = byPriority.values().stream()
+                    .map(activities -> activities.get(Activity.CORE))
+                    .filter(java.util.Objects::nonNull)
+                    .flatMap(Set::stream)
+                    .anyMatch(VillagerConfiguredFood.class::isInstance);
+            // Activity.CORE is registered under several priorities, each with its OWN set. Checking only
+            // the set being iterated would install one share behavior per priority (7-8 per farmer), each
+            // rolling its own chance every tick. Scan across priorities exactly like the food check above.
+            boolean shareBehaviorInstalled = byPriority.values().stream()
+                    .map(activities -> activities.get(Activity.CORE))
+                    .filter(java.util.Objects::nonNull)
+                    .flatMap(Set::stream)
+                    .anyMatch(VillagerShareItems.class::isInstance);
+
+            if (farmer) {
+                // Install the extra-soil aware secondary-POI sensor so a pure CE farm populates SECONDARY_JOB_SITE.
+                try {
+                    Map<Object, Object> sensors = (Map<Object, Object>) BRAIN_SENSORS.get(brain);
+                    // Keep the sensor replacement idempotent for repeated entity lifecycle events.
+                    if (!(sensors.get(SensorType.SECONDARY_POIS) instanceof VillagerSecondaryPoiSensor)) {
+                        sensors.put(SensorType.SECONDARY_POIS, new VillagerSecondaryPoiSensor());
+                    }
+                    // Restrict wanted-item detection to configured seeds so villagers ignore same-base items.
+                    if (!(sensors.get(SensorType.NEAREST_ITEMS) instanceof VillagerWantedItemSensor)) {
+                        sensors.put(SensorType.NEAREST_ITEMS, new VillagerWantedItemSensor());
+                    }
+                } catch (IllegalAccessException e) {
+                    this.plugin.getLogger().warning("Failed to install villager secondary-POI sensor: " + e.getMessage());
                 }
-                // Restrict wanted-item detection to configured seeds so villagers ignore same-base items.
-                if (!(sensors.get(SensorType.NEAREST_ITEMS) instanceof VillagerWantedItemSensor)) {
-                    sensors.put(SensorType.NEAREST_ITEMS, new VillagerWantedItemSensor());
-                }
-            } catch (IllegalAccessException e) {
-                this.plugin.getLogger().warning("Failed to install villager secondary-POI sensor: " + e.getMessage());
             }
             int replaced = 0;
-            for (int i = 0; i < entries.size(); i++) {
-                ShufflingList.WeightedEntry<?> entry = (ShufflingList.WeightedEntry<?>) entries.get(i);
-                Object data = entry.getData();
-                if (data instanceof HarvestFarmland hf && !(hf instanceof VillagerFarmBehavior)) {
-                    entries.set(i, (ShufflingList.WeightedEntry<?>) WEIGHTED_ENTRY_CTOR.newInstance(new VillagerFarmBehavior(), entry.getWeight()));
-                    replaced++;
-                } else if (data.getClass() == UseBonemeal.class) {
-                    entries.set(i, (ShufflingList.WeightedEntry<?>) WEIGHTED_ENTRY_CTOR.newInstance(new VillagerUseBonemeal(), entry.getWeight()));
-                    replaced++;
-                } else if (data instanceof GateBehavior<?> gate) {
-                    replaced += this.replaceInsideGate(gate);
+            for (Map.Entry<Integer, Map<Activity, Set<BehaviorControl<?>>>> priorityEntry : byPriority.entrySet()) {
+                Set<BehaviorControl<?>> core = priorityEntry.getValue().get(Activity.CORE);
+                if (core != null) {
+                    if (!foodBehaviorInstalled) {
+                        core.add(new VillagerConfiguredFood());
+                        foodBehaviorInstalled = true;
+                    }
+                    if (farmer && !shareBehaviorInstalled) {
+                        core.add(new VillagerShareItems());
+                        shareBehaviorInstalled = true;
+                    }
+                }
+                if (!farmer) {
+                    continue;
+                }
+                Set<BehaviorControl<?>> controls = priorityEntry.getValue().get(Activity.WORK);
+                if (controls == null) {
+                    continue;
+                }
+
+                for (BehaviorControl<?> control : List.copyOf(controls)) {
+                    if (control instanceof HarvestFarmland hf && !(hf instanceof VillagerFarmBehavior)) {
+                        controls.remove(control);
+                        controls.add(new VillagerFarmBehavior());
+                        replaced++;
+                    } else if (control.getClass() == UseBonemeal.class) {
+                        controls.remove(control);
+                        controls.add(new VillagerUseBonemeal());
+                        replaced++;
+                    } else if (control instanceof GateBehavior<?> gate) {
+                        replaced += this.replaceInsideGate(gate);
+                    }
                 }
             }
             if (replaced > 0) {
                 VillagersDelightPlugin.debug("farm: installed at " + bukkitVillager.getLocation() + " replaced=" + replaced);
             }
-        } catch (ReflectiveOperationException e) {
-            this.plugin.getLogger().warning("Failed to replace villager farm behavior: " + e.getMessage());
-        }
-    }
-
-    private void installCoreBehaviors(Map<Activity, ShufflingList<BehaviorControl<?>>> behaviors, boolean farmer) {
-        try {
-            ShufflingList<BehaviorControl<?>> core = behaviors.get(Activity.CORE);
-            if (core == null) {
-                return;
-            }
-            @SuppressWarnings("unchecked")
-            List<ShufflingList.WeightedEntry<?>> entries = (List<ShufflingList.WeightedEntry<?>>) SHUFFLING_ENTRIES.get(core);
-            boolean foodInstalled = false;
-            boolean shareInstalled = false;
-            for (ShufflingList.WeightedEntry<?> entry : entries) {
-                foodInstalled |= entry.getData() instanceof VillagerConfiguredFood;
-                shareInstalled |= entry.getData() instanceof VillagerShareItems;
-            }
-            if (!foodInstalled) {
-                entries.add((ShufflingList.WeightedEntry<?>) WEIGHTED_ENTRY_CTOR.newInstance(new VillagerConfiguredFood(), 1));
-            }
-            if (farmer && !shareInstalled) {
-                entries.add((ShufflingList.WeightedEntry<?>) WEIGHTED_ENTRY_CTOR.newInstance(new VillagerShareItems(), 1));
-            }
-        } catch (ReflectiveOperationException e) {
-            this.plugin.getLogger().warning("Failed to install villager core behavior: " + e.getMessage());
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError t) {
+            // Catches Error too: a version mismatch surfaces as NoClassDefFoundError the first time an
+            // injected behavior is constructed, and letting that escape aborts the entity-load handler
+            // for every chunk that contains a villager.
+            this.plugin.getLogger().warning("Failed to replace villager farm behavior: " + t);
         }
     }
 
@@ -272,17 +300,17 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
         @Override
         protected boolean checkExtraStartConditions(ServerLevel level, Villager villager) {
-            return !FOOD_ITEMS.isEmpty()
-                    && level.getRandom().nextInt(20) == 0
+            return !FOOD_IDS.isEmpty()
+                    && FOOD_ENABLED && level.getRandom().nextDouble() < FOOD_CHECK_CHANCE
                     && villager.getAge() == 0
                     && !villager.isSleeping()
-                    && availableFoodPoints(villager) < Villager.BREEDING_FOOD_THRESHOLD;
+                    && foodLevel(villager) < Villager.BREEDING_FOOD_THRESHOLD
+                    && hasConfiguredNonVanillaFood(villager);
         }
 
         @Override
         protected void start(ServerLevel level, Villager villager, long gameTime) {
-            int points = availableFoodPoints(villager);
-            int needed = Villager.BREEDING_FOOD_THRESHOLD - points;
+            int needed = Villager.BREEDING_FOOD_THRESHOLD - foodLevel(villager);
             if (needed <= 0) {
                 return;
             }
@@ -290,7 +318,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             int consumed = 0;
             for (int slot = 0; slot < inventory.getContainerSize() && consumed < needed; slot++) {
                 ItemStack stack = inventory.getItem(slot);
-                if (FOOD_ITEMS.contains(stack.getItem())) {
+                if (isConfiguredCustomFood(stack)) {
                     int amount = Math.min(stack.getCount(), needed - consumed);
                     inventory.removeItem(slot, amount);
                     consumed += amount;
@@ -301,13 +329,27 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             }
         }
 
-        private static int availableFoodPoints(Villager villager) {
+        private static boolean hasConfiguredNonVanillaFood(Villager villager) {
             SimpleContainer inventory = villager.getInventory();
-            int points = foodLevel(villager);
-            for (Map.Entry<Item, Integer> food : Villager.FOOD_POINTS.entrySet()) {
-                points += inventory.countItem(food.getKey()) * food.getValue();
+            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                if (isConfiguredCustomFood(stack)) {
+                    return true;
+                }
             }
-            return points;
+            return false;
+        }
+
+        private static boolean isConfiguredCustomFood(ItemStack stack) {
+            return FOOD_IDS.contains(foodId(stack))
+                    && (CeItemAccess.customItemId(CraftItemStack.asBukkitCopy(stack)) != null
+                    || !Villager.FOOD_POINTS.containsKey(stack.getItem()));
+        }
+
+        private static String foodId(ItemStack stack) {
+            org.bukkit.inventory.ItemStack bukkit = CraftItemStack.asBukkitCopy(stack);
+            var custom = CeItemAccess.customItemId(bukkit);
+            return custom != null ? custom.toString() : bukkit.getType().getKey().toString();
         }
 
         private static int foodLevel(Villager villager) {
@@ -356,7 +398,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         return replaced;
     }
 
-    private String describe(Object control) {
+    private String describe(BehaviorControl<?> control) {
         if (control instanceof GateBehavior<?> gate) {
             try {
                 ShufflingList<?> list = (ShufflingList<?>) GATE_BEHAVIORS.get(gate);

@@ -29,4 +29,6 @@ public interface VillagerAiInjector {
     // Configures the CE item ids villagers may compost (VillagerWorkAtComposter) without modifying
     // the vanilla COMPOSTABLES table or exposing their base materials to global composting.
     void configureCeCompost(java.util.Set<String> ceItemIds);
+
+    void configureBehavior(VillagersDelightConfig.BehaviorSettings settings);
 }

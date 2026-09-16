@@ -80,7 +80,7 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
     protected void start(ServerLevel level, Villager body, long timestamp) {
         this.setCurrentCropAsTarget(body);
         body.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BONE_MEAL));
-        this.nextWorkCycleTime = timestamp + 20L;
+        this.nextWorkCycleTime = timestamp;
         this.timeWorkedSoFar = 0;
     }
 
@@ -111,7 +111,7 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
                     level.levelEvent(1505, target, 15);
                     this.cropPos = this.pickNextTarget(level, body);
                     this.setCurrentCropAsTarget(body);
-                    this.nextWorkCycleTime = timestamp + 40L;
+                    this.nextWorkCycleTime = timestamp + NmsVillagerAi.BONEMEAL_RETRY_DELAY;
                     break;
                 }
             }
@@ -121,6 +121,6 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
 
     @Override
     protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
-        return this.timeWorkedSoFar < 80 && this.cropPos.isPresent();
+        return this.timeWorkedSoFar < NmsVillagerAi.BONEMEAL_WORK_DURATION && this.cropPos.isPresent();
     }
 }
