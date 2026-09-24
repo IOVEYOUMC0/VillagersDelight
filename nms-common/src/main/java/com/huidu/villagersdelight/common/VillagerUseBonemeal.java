@@ -1,4 +1,4 @@
-package com.huidu.villagersdelight.impl26;
+package com.huidu.villagersdelight.common;
 
 import com.huidu.villagersdelight.core.CropRegistry;
 import com.google.common.collect.ImmutableMap;
@@ -70,7 +70,7 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
         if (state.getBlock() instanceof CropBlock crop) {
             return !crop.isMaxAge(state);
         }
-        ImmutableBlockState ceState = VillagerFarmBehavior.ceStateAt(level, pos);
+        ImmutableBlockState ceState = VillagerBlockAccess.ceStateAt(level, pos);
         return CropRegistry.cropOf(ceState) != null
                 && state.getBlock() instanceof BonemealableBlock bonemealable
                 && bonemealable.isValidBonemealTarget(level, pos, state);
@@ -111,7 +111,7 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
                     level.levelEvent(1505, target, 15);
                     this.cropPos = this.pickNextTarget(level, body);
                     this.setCurrentCropAsTarget(body);
-                    this.nextWorkCycleTime = timestamp + NmsVillagerAi.BONEMEAL_RETRY_DELAY;
+                    this.nextWorkCycleTime = timestamp + VillagerAiSettings.BONEMEAL_RETRY_DELAY;
                     break;
                 }
             }
@@ -121,6 +121,6 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
 
     @Override
     protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
-        return this.timeWorkedSoFar < NmsVillagerAi.BONEMEAL_WORK_DURATION && this.cropPos.isPresent();
+        return this.timeWorkedSoFar < VillagerAiSettings.BONEMEAL_WORK_DURATION && this.cropPos.isPresent();
     }
 }

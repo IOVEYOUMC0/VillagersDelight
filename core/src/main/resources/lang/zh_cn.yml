@@ -10,6 +10,7 @@ messages:
   inventory_open: "[VillagersDelight] 该村民的背包已被打开"
   villager_unavailable: "[VillagersDelight] 村民当前不可用"
   inventory_opened: "[VillagersDelight] 已打开村民背包，关闭界面时保存改动"
-  config_invalid: "[VillagersDelight] 配置错误，已保留上一份有效配置: {error}"
+  config_invalid: "配置错误，已保留上一份有效配置: {error}"
+  config_loaded: "已加载 {crops} 条作物规则、{harvest_drops} 组收获掉落、{pickup_foods} 项拾取食物和 {compost_items} 项堆肥物品"
   no_permission: "[VillagersDelight] 你没有权限执行此命令"
   inventory_failed: "[VillagersDelight] 打开村民背包失败，请查看服务器日志"

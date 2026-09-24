@@ -126,8 +126,8 @@ public final class FDCrop {
         return value != null && String.valueOf(value).equalsIgnoreCase("upper");
     }
 
-    // State for the lower half after its upper half was harvested: age drops back below mature and
-    // the half is forced to lower, so the stalk regrows panicles (mirrors FD's reset-on-harvest).
+    // After harvesting the upper half, reset the stalk below maturity and force its lower-half state
+    // so it can regrow the upper crop.
     public ImmutableBlockState resetAfterUpperHarvest(ImmutableBlockState lower) {
         if (this.harvestMode != HarvestMode.TALL || lower == null) {
             return lower;

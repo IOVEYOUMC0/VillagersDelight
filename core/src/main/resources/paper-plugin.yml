@@ -26,6 +26,10 @@ dependencies:
       load: BEFORE
       required: false
       join-classpath: true
+    FarmersDelight:
+      load: BEFORE
+      required: false
+      join-classpath: false
 
 permissions:
   villagersdelight.reload:

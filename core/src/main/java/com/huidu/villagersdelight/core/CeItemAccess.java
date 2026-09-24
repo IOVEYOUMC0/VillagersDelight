@@ -15,10 +15,9 @@ public final class CeItemAccess {
     // Custom item id behind a Bukkit item stack, or null if it is not a custom CE item.
     @Nullable
     public static Key customItemId(ItemStack stack) {
-        if (stack == null || stack.isEmpty() || !CraftEngineItems.isCustomItem(stack)) {
-            return null;
-        }
-        return CraftEngineItems.getCustomItemId(stack);
+        // getCustomItemId already reports null for vanilla stacks (CE re-checks emptiness inside), so the
+        // isCustomItem probe only wrapped the same stack a second time.
+        return stack == null || stack.isEmpty() ? null : CraftEngineItems.getCustomItemId(stack);
     }
 
     public static boolean isItem(ItemStack stack, Key itemId) {

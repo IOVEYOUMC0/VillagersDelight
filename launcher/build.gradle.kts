@@ -49,8 +49,8 @@ tasks.shadowJar {
     mergeServiceFiles()
 
     doFirst {
-        // A missing input is silent with DuplicatesStrategy.EXCLUDE: the merge simply takes the core
-        // classes from whichever NMS jar came next, which is how a Java 25 main class shipped once.
+        // Require every input JAR so duplicate filtering cannot select newer-Java core classes
+        // from an NMS module when the Java 21 core artifact is missing.
         listOf(coreJar, nms26Jar, nms1211Jar, nms1214Jar).forEach { jar ->
             check(jar.isFile) {
                 "Missing input jar ${jar.path}. Build core and all three NMS modules before the launcher."

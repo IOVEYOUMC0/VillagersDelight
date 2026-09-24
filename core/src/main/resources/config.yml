@@ -51,8 +51,9 @@ crops:
     seed: farmersdelight:onion
 
 # 永不识别的作物 id（黑名单，叠加在 crops 清单之上）。
-disabled-crops: []
-
+disabled-crops:
+  # No entries.
+  []
 # 额外土壤：所有上方列出的作物默认都可种在这些方块上（原版耕地始终允许）。
 extra-soils:
   - farmersdelight:rich_soil_farmland
@@ -84,12 +85,18 @@ harvest-drops:
 
 # 村民拾取设置：
 # crops: 村民会拾取的种子物品，留空以自动识别已配置的作物种子。
-# foods: 食物产物列表。追加 villager_picks_up tag 使村民能捡起，并识别为食物；
-#         计入繁殖食物点数，繁殖时被村民消耗。
+# foods: 拾取的食物产物列表。追加 villager_picks_up tag 使村民能捡起；
+#         繁殖食物点数见 villager-ai.food.points，值为 0 的物品只拾取、不食用。
 #         留空则不进行判定。
+# use-datapack-tag: true 沿用旧路径，把 CE 物品的基底材质注入 villager_picks_up data pack
+#                    （需要数据包/reloadData，同基材的原版同名物品也会被捡）；
+#                    false 改用按 CE 物品 id 直接拾取，无需数据包且不误放原版同名物品。
 pickup:
   enabled: true
-  crops: []
+  use-datapack-tag: true
+  crops:
+    # No entries.
+    []
   foods:
     - farmersdelight:cabbage
     - farmersdelight:tomato
@@ -106,35 +113,28 @@ compost-items:
   - farmersdelight:onion
   - farmersdelight:rice_panicle
 
-# 配置此项后村民会把对应物品分享给附近其他村民。
-# 持有量超过半组(maxStackSize/2)时，只把超过半组的余量分给背包未满且需要该物品的邻近村民；否则不分享。
-share-items:
-  enabled: true
-  items:
-    - minecraft:wheat
-    - minecraft:wheat_seeds
-    - minecraft:beetroot_seeds
-    - minecraft:carrot
-    - minecraft:potato
-    - farmersdelight:cabbage_seeds
-    - farmersdelight:tomato_seeds
-    - farmersdelight:rice
-    - farmersdelight:onion
-
 # Optional tuning for the injected farmer behaviours. Values below preserve the defaults.
 villager-ai:
   food:
     enabled: true
     check-chance: 0.05
+    # 农民只保留以下数量的自定义种子，余量仍可食用；其他职业不保留种植储备。
+    # 原版胡萝卜、马铃薯仍由原版食物行为处理。
     protect-custom-seeds: true
+    minimum-kept-seeds: 32
+    # pickup.foods 中每个物品的繁殖食物点数（0~12 整数）。
+    # 未配置时，下列物品使用内置点数，其他物品默认为 1。
+    # 0 表示仅拾取、不食用；稻米为 2 点，稻穗为 0 点。
+    points:
+      farmersdelight:cabbage: 1
+      farmersdelight:tomato: 1
+      farmersdelight:onion: 1
+      farmersdelight:rice: 2
+      farmersdelight:rice_panicle: 0
   compost:
     max-items-per-work: 20
     minimum-kept-per-item: 32
     default-chance: 0.3
-  sharing:
-    chance: 0.1
-    range: 6.0
-    keep-fraction: 0.5
   bonemeal:
     retry-delay-ticks: 40
     work-duration-ticks: 80

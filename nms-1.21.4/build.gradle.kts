@@ -13,24 +13,41 @@ repositories {
     maven("https://repo.momirealms.net/releases/")
 }
 
-// CraftEngine is pinned to the vendored 26.8 jar shared from ../FarmersDelight/libs/.
+// CraftEngine is pinned to the official Maven 26.9.1 artifacts.
 
 dependencies {
     paperweight.paperDevBundle("1.21.4-R0.1-SNAPSHOT")
     compileOnly("org.jetbrains:annotations:26.1.0")
-    // CraftEngine — pinned to the vendored 26.8 jar (shared from ../FarmersDelight/libs; 26.8-SNAPSHOT is unpublished).
-    compileOnly(files("../../FarmersDelight/libs/craft-engine-26.8.jar"))
-    compileOnly(files("../../FarmersDelight/libs/craft-engine-core-26.8.jar"))
-    compileOnly(files("../../FarmersDelight/libs/craft-engine-proxy-26.8.jar"))
+    // CraftEngine 26.9.1 from the official Maven repository.
+    compileOnly("net.momirealms:craft-engine-bukkit:26.9.1")
+    compileOnly("net.momirealms:craft-engine-core:26.9.1")
+    compileOnly("net.momirealms:craft-engine-bukkit-proxy:26.9.1")
 }
 
 // The core layer (version-agnostic) lives under ../core and is compiled into this jar together
 // with the NMS implementation, so the final plugin jar is self-contained.
+// The shared NMS behaviour sources live in ../nms-common and are compiled into every adapter jar. 1.21.4 keeps
+// Villager in net.minecraft.world.entity.npc, while the shared sources use the 1.21.11+ npc.villager package, so
+// they are copied with that single import rewritten. Sync keeps the generated folder free of stale files.
+val sharedNmsSources = layout.buildDirectory.dir("generated/nms-common")
+val prepareSharedNmsSources = tasks.register<Sync>("prepareSharedNmsSources") {
+    from("../nms-common/src/main/java")
+    into(sharedNmsSources)
+    filter { line: String ->
+        line.replace("net.minecraft.world.entity.npc.villager.Villager", "net.minecraft.world.entity.npc.Villager")
+    }
+}
+
 sourceSets {
     main {
         java.srcDir("../core/src/main/java")
+        java.srcDir(sharedNmsSources)
         resources.srcDir("../core/src/main/resources")
     }
+}
+
+tasks.named("compileJava") {
+    dependsOn(prepareSharedNmsSources)
 }
 
 java {

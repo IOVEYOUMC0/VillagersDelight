@@ -6,8 +6,16 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /** Small editable message bundle; files live in plugins/VillagersDelight/lang/. */
 final class VillagersDelightLanguage {
@@ -28,14 +36,53 @@ final class VillagersDelightLanguage {
             File file = new File(dir, locale + ".yml");
             if (!file.exists()) {
                 plugin.saveResource("lang/" + locale + ".yml", false);
+                continue;
             }
+            mergeMissingBundledKeys(file, locale);
         }
         reload();
     }
 
+    // A deployed language file never gains keys added by a later build, because saveResource only writes when
+    // the file is absent; without this the new messages printed their raw key. Missing keys are copied in and
+    // the file is rewritten only when something was added, so operator edits survive.
+    private void mergeMissingBundledKeys(File file, String locale) {
+        InputStream bundled = plugin.getResource("lang/" + locale + ".yml");
+        if (bundled == null) {
+            return;
+        }
+        try (InputStreamReader reader = new InputStreamReader(bundled, StandardCharsets.UTF_8)) {
+            YamlConfiguration source = YamlConfiguration.loadConfiguration(reader);
+            YamlConfiguration existing = YamlConfiguration.loadConfiguration(file);
+            Set<String> present = existing.getKeys(true);
+            if (present.isEmpty() && file.length() > 0) {
+                // The file exists but nothing parsed out of it: keep a copy beside it before the merge rewrites
+                // it from the bundled copy, so a broken operator edit stays recoverable.
+                Files.copy(file.toPath(), file.toPath().resolveSibling(file.getName() + ".bak"),
+                        StandardCopyOption.REPLACE_EXISTING);
+                plugin.getLogger().warning("Language file " + file.getName()
+                        + " could not be read; a .bak copy was kept and the bundled defaults were restored");
+            }
+            int added = 0;
+            for (String key : source.getKeys(true)) {
+                if (source.isConfigurationSection(key) || present.contains(key)) {
+                    continue;
+                }
+                existing.set(key, source.get(key));
+                added++;
+            }
+            if (added > 0) {
+                existing.save(file);
+                plugin.getLogger().info("Added " + added + " missing language key(s) to " + file.getName());
+            }
+        } catch (IOException | RuntimeException e) {
+            plugin.getLogger().warning("Failed to update language file " + file.getName() + ": " + e.getMessage());
+        }
+    }
+
     void reload() {
         File dir = new File(plugin.getDataFolder(), "lang");
-        Map<String, YamlConfiguration> loaded = new java.util.HashMap<>();
+        Map<String, YamlConfiguration> loaded = new HashMap<>();
         File[] files = dir.listFiles((d, n) -> n.endsWith(".yml"));
         if (files != null) {
             for (File file : files) {

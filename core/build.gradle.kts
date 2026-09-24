@@ -11,13 +11,15 @@ repositories {
     maven("https://repo.momirealms.net/releases/")
 }
 
-// CraftEngine is pinned to the vendored 26.8 jar shared from ../FarmersDelight/libs/.
+// CraftEngine is pinned to the official Maven 26.9.1 artifacts.
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
     compileOnly("org.jetbrains:annotations:26.1.0")
-    // CraftEngine — pinned to the vendored 26.8 jar (shared from ../FarmersDelight/libs; 26.8-SNAPSHOT is unpublished).
-    compileOnly(files("../../FarmersDelight/libs/craft-engine-26.8.jar"))
+    // CraftEngine 26.9.1 from the official Maven repository.
+    compileOnly("net.momirealms:craft-engine-bukkit:26.9.1")
+    // The bukkit artifact no longer bundles core, so the core classes come from their own jar.
+    compileOnly("net.momirealms:craft-engine-core:26.9.1")
 }
 
 java {
@@ -34,4 +36,20 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.jar {
     archiveBaseName.set("villagersdelight-core")
+}
+
+configurations.testImplementation {
+    extendsFrom(configurations.compileOnly.get())
+}
+
+val checkFoodRules = tasks.register<JavaExec>("checkFoodRules") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.huidu.villagersdelight.core.VillagerFoodRulesCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    enableAssertions = true
+}
+
+tasks.check {
+    dependsOn(checkFoodRules)
 }

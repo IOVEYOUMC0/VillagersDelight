@@ -51,7 +51,8 @@ public final class PickupEnabler {
         // and re-listing a vanilla material is harmless.
         Set<Material> desired = new LinkedHashSet<>();
         for (FDCrop crop : registry.allCrops()) {
-            if (!enabledCrops.isEmpty() && !enabledCrops.contains(crop.blockId())) {
+            if (!enabledCrops.isEmpty() && !enabledCrops.contains(crop.seedItem())
+                    && !enabledCrops.contains(crop.blockId())) {
                 continue;
             }
             Key seed = crop.seedItem();
@@ -75,6 +76,12 @@ public final class PickupEnabler {
                 continue;
             }
             desired.add(material);
+        }
+        // Harvest-only items still need the pickup tag even when their food value is zero.
+        for (var drops : config.harvestDrops().values()) {
+            for (var drop : drops) {
+                if (drop != null && !drop.getType().isAir()) desired.add(drop.getType());
+            }
         }
         if (desired.isEmpty()) {
             return;
@@ -122,12 +129,11 @@ public final class PickupEnabler {
             if (!Files.readString(tagFile.toPath(), StandardCharsets.UTF_8).equals(tagContent(materials))) {
                 return false;
             }
-            // A leftover pack.mcmeta from the pre-fix build (pack_format 81+) makes reloadData log
-            // the "missing min_format and max_format" error, so only treat the pack as up to date
-            // when the fixed format 48 metadata is present too.
+            // Compared against the string writeDataPack would produce now, so a pack left behind by
+            // a different server version is rewritten instead of being trusted.
             File meta = new File(root, "pack.mcmeta");
             return meta.isFile()
-                    && Files.readString(meta.toPath(), StandardCharsets.UTF_8).contains("\"pack_format\":48");
+                    && Files.readString(meta.toPath(), StandardCharsets.UTF_8).equals(packMetadata());
         } catch (IOException e) {
             return false;
         }
@@ -156,6 +162,91 @@ public final class PickupEnabler {
         if (allActive) {
             plugin.getLogger().info("Pickup: tag active, villagers can now pick up " + materials);
         }
+    }
+
+    // The data pack format is version specific: a single pack_format up to 1.21.8, a min_format and
+    // max_format pair from 1.21.9 onward. A pack whose declared format falls outside the range the
+    // server accepts is skipped without an error, and the tag never reaches the registry -- the only
+    // symptom would be the warning in verifyInjectedTags, which blames timing for a format problem.
+    // VillagersDelight carries no FarmersDelight dependency on purpose, so this repeats the probe in
+    // com.huidu.farmersdelight.api.util.DatapackSupport rather than calling it.
+    private static String packMetadata() {
+        PackFormat format = serverDataPackFormat();
+        if (format == null) {
+            format = fallbackPackFormat();
+        }
+        String line = format.range()
+                ? "\"min_format\":" + format.major() + ",\"max_format\":" + MAX_RANGE_FORMAT
+                : "\"pack_format\":" + format.major();
+        return "{\"pack\":{\"description\":\"VillagersDelight villager seed pickup\"," + line + "}}\n";
+    }
+
+    private record PackFormat(int major, boolean range) {
+    }
+
+    private static final int MAX_RANGE_FORMAT = 150;
+
+    // 1.21.4 exposes getPackVersion(PackType) returning an int; 26.x renamed it to packVersion(PackType)
+    // and returns a PackFormat record. Both are reached reflectively so one jar covers the whole range.
+    private static PackFormat serverDataPackFormat() {
+        try {
+            Class<?> shared = Class.forName("net.minecraft.SharedConstants");
+            Object worldVersion = null;
+            for (String name : new String[]{"getCurrentVersion", "currentVersion"}) {
+                try {
+                    worldVersion = shared.getMethod(name).invoke(null);
+                    break;
+                } catch (NoSuchMethodException ignored) {
+                    // try the other spelling
+                }
+            }
+            if (worldVersion == null) {
+                return null;
+            }
+            Class<?> packTypeClass = Class.forName("net.minecraft.server.packs.PackType");
+            Object serverData = null;
+            for (Object constant : packTypeClass.getEnumConstants()) {
+                if ("SERVER_DATA".equals(((Enum<?>) constant).name())) {
+                    serverData = constant;
+                    break;
+                }
+            }
+            if (serverData == null) {
+                return null;
+            }
+            for (String name : new String[]{"packVersion", "getPackVersion"}) {
+                try {
+                    Object result = worldVersion.getClass()
+                            .getMethod(name, packTypeClass).invoke(worldVersion, serverData);
+                    if (result instanceof Integer value) {
+                        return new PackFormat(value, false);
+                    }
+                    Object major = result.getClass().getMethod("major").invoke(result);
+                    return new PackFormat(((Number) major).intValue(), true);
+                } catch (NoSuchMethodException ignored) {
+                    // try the other spelling
+                }
+            }
+        } catch (Throwable ignored) {
+            // Any linkage or access failure falls back to the version table below.
+        }
+        return null;
+    }
+
+    // Data pack format history: 1.21.4=61, 1.21.5=71, 1.21.6/7/8=80; 1.21.9 and every 26.x release use
+    // the min_format/max_format range form (88 is the 1.21.9 data pack major format).
+    private static PackFormat fallbackPackFormat() {
+        String version = Bukkit.getBukkitVersion();
+        if (version.contains("1.21.4")) {
+            return new PackFormat(61, false);
+        }
+        if (version.contains("1.21.5")) {
+            return new PackFormat(71, false);
+        }
+        if (version.contains("1.21.6") || version.contains("1.21.7") || version.contains("1.21.8")) {
+            return new PackFormat(80, false);
+        }
+        return new PackFormat(88, true);
     }
 
     // Resolves the world folder that holds level.dat. Same heuristic as FarmersDelight's
@@ -193,14 +284,7 @@ public final class PickupEnabler {
     private static boolean writeDataPack(File root, Set<Material> materials) {
         try {
             Files.createDirectories(root.toPath());
-            // Fixed pack format 48 (1.21): formats above 81 require min_format/max_format in the
-            // metadata, which a plain pack.mcmeta does not provide. Older formats are accepted on
-            // newer servers, so 48 loads cleanly on 26.x.
-            Files.writeString(
-                    new File(root, "pack.mcmeta").toPath(),
-                    "{\"pack\":{\"description\":\"VillagersDelight villager seed pickup\",\"pack_format\":48}}\n",
-                    StandardCharsets.UTF_8
-            );
+            Files.writeString(new File(root, "pack.mcmeta").toPath(), packMetadata(), StandardCharsets.UTF_8);
             File tagsDir = new File(root, "data/minecraft/tags/item");
             Files.createDirectories(tagsDir.toPath());
             Files.writeString(

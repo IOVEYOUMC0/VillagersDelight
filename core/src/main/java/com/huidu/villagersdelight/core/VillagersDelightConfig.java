@@ -22,6 +22,13 @@ import java.util.regex.Pattern;
 // extra soils (besides vanilla farmland and the global extra-soils).
 public final class VillagersDelightConfig {
 
+    /** CE custom items can be queried before CraftEngine has finished its deferred registry load. */
+    static final class CraftEngineNotReadyException extends IllegalArgumentException {
+        CraftEngineNotReadyException(String message) {
+            super(message);
+        }
+    }
+
     private static final Pattern ITEM_ID = Pattern.compile("^[a-z0-9_.-]+:[a-z0-9/._-]+$");
 
     // One configured crop: the seed item (CE custom or vanilla), any crop-specific soils, the
@@ -32,13 +39,18 @@ public final class VillagersDelightConfig {
 
     public record BehaviorSettings(boolean foodEnabled, double foodCheckChance, boolean protectCustomSeeds,
                                    int compostMaxItemsPerWork, int compostMinimumKeptPerItem, double compostDefaultChance,
-                                   double sharingChance, double sharingRange, double sharingKeepFraction,
                                    int bonemealRetryDelayTicks, int bonemealWorkDurationTicks,
                                    int farmRetargetDelayTicks, int farmStopCooldownTicks, int farmWorkDurationTicks) {
     }
 
     private static final BehaviorSettings DEFAULT_BEHAVIOR = new BehaviorSettings(
-            true, 0.05, true, 20, 32, 0.3, 0.1, 6.0, 0.5, 40, 80, 20, 40, 200);
+            true, 0.05, true, 20, 32, 0.3, 40, 80, 20, 40, 200);
+    private static final Map<String, Integer> DEFAULT_FD_FOOD_POINTS = Map.of(
+            "farmersdelight:cabbage", 1,
+            "farmersdelight:tomato", 1,
+            "farmersdelight:onion", 1,
+            "farmersdelight:rice", 2,
+            "farmersdelight:rice_panicle", 0);
 
     private final Map<Key, CropEntry> cropEntries;
     private final Set<Key> disabledCrops;
@@ -48,11 +60,12 @@ public final class VillagersDelightConfig {
     private final boolean pickupEnabled;
     private final List<Key> pickupCrops;
     private final List<Key> pickupFoods;
-    private final boolean shareEnabled;
-    private final List<Key> shareItems;
+    private final boolean pickupUseDatapackTag;
     private final List<Key> compostItems;
     private final boolean customCropsEnabled;
     private final BehaviorSettings behaviorSettings;
+    private final Map<String, Integer> foodPoints;
+    private final int minimumKeptSeeds;
 
     private VillagersDelightConfig(
             Map<Key, CropEntry> cropEntries,
@@ -62,12 +75,13 @@ public final class VillagersDelightConfig {
             boolean pickupEnabled,
             List<Key> pickupCrops,
             List<Key> pickupFoods,
-            boolean shareEnabled,
-            List<Key> shareItems,
+            boolean pickupUseDatapackTag,
             List<Key> compostItems,
             boolean debug,
             boolean customCropsEnabled,
-            BehaviorSettings behaviorSettings
+            BehaviorSettings behaviorSettings,
+            Map<String, Integer> foodPoints,
+            int minimumKeptSeeds
     ) {
         this.cropEntries = cropEntries;
         this.disabledCrops = disabledCrops;
@@ -76,12 +90,13 @@ public final class VillagersDelightConfig {
         this.pickupEnabled = pickupEnabled;
         this.pickupCrops = pickupCrops;
         this.pickupFoods = pickupFoods;
-        this.shareEnabled = shareEnabled;
-        this.shareItems = shareItems;
+        this.pickupUseDatapackTag = pickupUseDatapackTag;
         this.compostItems = compostItems;
         this.debug = debug;
         this.customCropsEnabled = customCropsEnabled;
         this.behaviorSettings = behaviorSettings;
+        this.foodPoints = Map.copyOf(foodPoints);
+        this.minimumKeptSeeds = minimumKeptSeeds;
     }
 
     public static VillagersDelightConfig load(FileConfiguration yaml) {
@@ -137,31 +152,46 @@ public final class VillagersDelightConfig {
             pickupFoods.add(parseKey(id, "pickup.foods"));
         }
 
-        List<Key> shareItems = new ArrayList<>();
-        for (String id : yaml.getStringList("share-items.items")) {
-            shareItems.add(parseKey(id, "share-items.items"));
-        }
-
         List<Key> compostItems = new ArrayList<>();
         for (String id : yaml.getStringList("compost-items")) {
             compostItems.add(parseKey(id, "compost-items"));
         }
 
         BehaviorSettings behavior = new BehaviorSettings(
-                yaml.getBoolean("villager-ai.food.enabled", DEFAULT_BEHAVIOR.foodEnabled()),
+                bool(yaml, "villager-ai.food.enabled", DEFAULT_BEHAVIOR.foodEnabled()),
                 probability(yaml, "villager-ai.food.check-chance", DEFAULT_BEHAVIOR.foodCheckChance()),
-                yaml.getBoolean("villager-ai.food.protect-custom-seeds", DEFAULT_BEHAVIOR.protectCustomSeeds()),
+                bool(yaml, "villager-ai.food.protect-custom-seeds", DEFAULT_BEHAVIOR.protectCustomSeeds()),
                 positiveInt(yaml, "villager-ai.compost.max-items-per-work", DEFAULT_BEHAVIOR.compostMaxItemsPerWork()),
                 nonNegativeInt(yaml, "villager-ai.compost.minimum-kept-per-item", DEFAULT_BEHAVIOR.compostMinimumKeptPerItem()),
                 probability(yaml, "villager-ai.compost.default-chance", DEFAULT_BEHAVIOR.compostDefaultChance()),
-                probability(yaml, "villager-ai.sharing.chance", DEFAULT_BEHAVIOR.sharingChance()),
-                positiveDouble(yaml, "villager-ai.sharing.range", DEFAULT_BEHAVIOR.sharingRange()),
-                probability(yaml, "villager-ai.sharing.keep-fraction", DEFAULT_BEHAVIOR.sharingKeepFraction()),
                 nonNegativeInt(yaml, "villager-ai.bonemeal.retry-delay-ticks", DEFAULT_BEHAVIOR.bonemealRetryDelayTicks()),
                 positiveInt(yaml, "villager-ai.bonemeal.work-duration-ticks", DEFAULT_BEHAVIOR.bonemealWorkDurationTicks()),
                 nonNegativeInt(yaml, "villager-ai.farm.retarget-delay-ticks", DEFAULT_BEHAVIOR.farmRetargetDelayTicks()),
                 nonNegativeInt(yaml, "villager-ai.farm.stop-cooldown-ticks", DEFAULT_BEHAVIOR.farmStopCooldownTicks()),
                 positiveInt(yaml, "villager-ai.farm.work-duration-ticks", DEFAULT_BEHAVIOR.farmWorkDurationTicks()));
+
+        Map<String, Integer> foodPoints = new HashMap<>();
+        for (Key food : pickupFoods) foodPoints.put(food.toString(),
+                DEFAULT_FD_FOOD_POINTS.getOrDefault(food.toString(), 1));
+        String pointsPath = "villager-ai.food.points";
+        ConfigurationSection points = !yaml.contains(pointsPath, true) && yaml.getDefaults() != null
+                ? yaml.getDefaults().getConfigurationSection(pointsPath) : yaml.getConfigurationSection(pointsPath);
+        if (yaml.contains(pointsPath) && points == null) {
+            throw new IllegalArgumentException(pointsPath + " must be an item-id to number mapping");
+        }
+        if (points != null) {
+            for (var entry : points.getValues(false).entrySet()) {
+                String id = parseKey(entry.getKey(), pointsPath).toString();
+                Object raw = entry.getValue();
+                if (!(raw instanceof Number value) || !Double.isFinite(value.doubleValue())
+                        || value.doubleValue() != Math.rint(value.doubleValue())
+                        || value.doubleValue() < 0 || value.doubleValue() > 12) {
+                    throw new IllegalArgumentException(pointsPath + "." + id + " must be a whole number between 0 and 12");
+                }
+                if (foodPoints.containsKey(id)) foodPoints.put(id, value.intValue());
+            }
+        }
+        int minimumKeptSeeds = nonNegativeInt(yaml, "villager-ai.food.minimum-kept-seeds", 32);
 
         return new VillagersDelightConfig(
                 cropEntries,
@@ -171,17 +201,61 @@ public final class VillagersDelightConfig {
                 yaml.getBoolean("pickup.enabled", false),
                 pickupCrops,
                 pickupFoods,
-                yaml.getBoolean("share-items.enabled", true),
-                shareItems,
+                yaml.getBoolean("pickup.use-datapack-tag", true),
                 compostItems,
                 yaml.getBoolean("debug", false),
                 yaml.getBoolean("custom-crops.enabled", true),
-                behavior
+                behavior,
+                foodPoints,
+                minimumKeptSeeds
         );
     }
 
+    // The Bukkit getters answer with the fallback for anything that is not a number, so a quoted "0.05"
+    // or a stray boolean would configure the default while looking like it took effect. Read the raw
+    // value and reject a wrong type as loudly as a wrong range.
+    private static Number number(FileConfiguration yaml, String path, Number fallback) {
+        Object raw = yaml.get(path);
+        if (raw == null) {
+            return fallback;
+        }
+        if (!(raw instanceof Number n)) {
+            throw new IllegalArgumentException(path + " must be a number, got " + describe(raw));
+        }
+        return n;
+    }
+
+    // An integer setting given 20.9 would silently truncate to 20, so a fractional value is refused
+    // rather than rounded to something the operator did not write.
+    private static int integer(FileConfiguration yaml, String path, int fallback) {
+        Number value = number(yaml, path, fallback);
+        double exact = value.doubleValue();
+        if (exact != Math.rint(exact) || !Double.isFinite(exact)) {
+            throw new IllegalArgumentException(path + " must be a whole number, got " + value);
+        }
+        if (exact > Integer.MAX_VALUE || exact < Integer.MIN_VALUE) {
+            throw new IllegalArgumentException(path + " is out of range: " + value);
+        }
+        return (int) exact;
+    }
+
+    private static boolean bool(FileConfiguration yaml, String path, boolean fallback) {
+        Object raw = yaml.get(path);
+        if (raw == null) {
+            return fallback;
+        }
+        if (!(raw instanceof Boolean b)) {
+            throw new IllegalArgumentException(path + " must be true or false, got " + describe(raw));
+        }
+        return b;
+    }
+
+    private static String describe(Object raw) {
+        return raw instanceof String ? "the text \"" + raw + "\"" : raw.getClass().getSimpleName() + " " + raw;
+    }
+
     private static double probability(FileConfiguration yaml, String path, double fallback) {
-        double value = yaml.getDouble(path, fallback);
+        double value = number(yaml, path, fallback).doubleValue();
         if (!Double.isFinite(value) || value < 0.0 || value > 1.0) {
             throw new IllegalArgumentException(path + " must be between 0 and 1");
         }
@@ -189,19 +263,19 @@ public final class VillagersDelightConfig {
     }
 
     private static int positiveInt(FileConfiguration yaml, String path, int fallback) {
-        int value = yaml.getInt(path, fallback);
+        int value = integer(yaml, path, fallback);
         if (value < 1) throw new IllegalArgumentException(path + " must be at least 1");
         return value;
     }
 
     private static int nonNegativeInt(FileConfiguration yaml, String path, int fallback) {
-        int value = yaml.getInt(path, fallback);
+        int value = integer(yaml, path, fallback);
         if (value < 0) throw new IllegalArgumentException(path + " must be non-negative");
         return value;
     }
 
     private static double positiveDouble(FileConfiguration yaml, String path, double fallback) {
-        double value = yaml.getDouble(path, fallback);
+        double value = number(yaml, path, fallback).doubleValue();
         if (!Double.isFinite(value) || value <= 0.0) throw new IllegalArgumentException(path + " must be greater than 0");
         return value;
     }
@@ -225,7 +299,12 @@ public final class VillagersDelightConfig {
                 continue;
             }
             Material material = Material.matchMaterial(parts[1]);
-            if (material == null) throw new IllegalArgumentException(path + " unknown item: " + entry);
+            if (material == null) {
+                if (!"minecraft".equals(customId.namespace())) {
+                    throw new CraftEngineNotReadyException(path + " CE item not loaded yet: " + entry);
+                }
+                throw new IllegalArgumentException(path + " unknown item: " + entry);
+            }
             result.add(new ItemStack(material, Math.max(1, count)));
         }
         return result;
@@ -293,14 +372,10 @@ public final class VillagersDelightConfig {
         return this.pickupFoods;
     }
 
-    // Whether villagers throw surplus configured items at nearby villagers (share-items).
-    public boolean shareEnabled() {
-        return this.shareEnabled;
-    }
-
-    // Items villagers share with nearby villagers; each entry is a CE custom or vanilla item id.
-    public List<Key> shareItems() {
-        return this.shareItems;
+    // True to keep the legacy path where CE item base materials are injected into the
+    // villager_picks_up data pack; false to use the custom-id pickup behaviour instead.
+    public boolean pickupUseDatapackTag() {
+        return this.pickupUseDatapackTag;
     }
 
     // Items villagers may compost into bone meal; each entry is a CE custom or vanilla item id.
@@ -314,5 +389,10 @@ public final class VillagersDelightConfig {
 
     public BehaviorSettings behaviorSettings() {
         return this.behaviorSettings;
+    }
+
+    public VillagerFoodRules foodRules(Set<String> seeds) {
+        return new VillagerFoodRules(behaviorSettings.foodEnabled() ? foodPoints : Map.of(), seeds,
+                behaviorSettings.protectCustomSeeds() ? minimumKeptSeeds : 0);
     }
 }

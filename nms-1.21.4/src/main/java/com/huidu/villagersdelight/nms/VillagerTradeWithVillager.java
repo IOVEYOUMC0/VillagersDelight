@@ -1,4 +1,4 @@
-package com.huidu.villagersdelight.impl26;
+package com.huidu.villagersdelight.impl214;
 
 import com.google.common.collect.ImmutableSet;
 import com.huidu.villagersdelight.common.VillagerAiSettings;
@@ -9,8 +9,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
 import net.minecraft.world.entity.ai.behavior.TradeWithVillager;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
-import net.minecraft.world.entity.npc.villager.Villager;
-import net.minecraft.world.entity.npc.villager.VillagerProfession;
+import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -45,7 +45,7 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
         if (!(body.distanceToSqr(target) > 5.0)) {
             BehaviorUtils.lockGazeAndWalkToEachOther(body, target, 0.5F, 2);
             body.gossip(level, target, timestamp);
-            boolean isFarmer = body.getVillagerData().profession().is(VillagerProfession.FARMER);
+            boolean isFarmer = body.getVillagerData().getProfession() == VillagerProfession.FARMER;
             // Both counts come from one inventory pass; the food throw can take wheat with it, so the wheat
             // count is only refreshed when that throw actually ran.
             int[] totals = VillagerItems.foodPointsAndWheat(body);
@@ -67,8 +67,8 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
     }
 
     private static Set<Item> figureOutWhatIAmWillingToTrade(Villager myBody, Villager target) {
-        ImmutableSet<Item> targetItems = target.getVillagerData().profession().value().requestedItems();
-        ImmutableSet<Item> selfItems = myBody.getVillagerData().profession().value().requestedItems();
+        ImmutableSet<Item> targetItems = target.getVillagerData().getProfession().requestedItems();
+        ImmutableSet<Item> selfItems = myBody.getVillagerData().getProfession().requestedItems();
         return targetItems.stream().filter(entry -> !selfItems.contains(entry)).collect(Collectors.toSet());
     }
 

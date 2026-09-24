@@ -10,6 +10,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Method;
 import java.util.Optional;
+import java.util.Set;
 
 /** Optional CustomCrops bridge. It deliberately has no compile-time CustomCrops dependency. */
 public final class CustomCropsCompat {
@@ -74,7 +75,6 @@ public final class CustomCropsCompat {
         }
     }
 
-    @Nullable
     /** True when CustomCrops is present and enabled. Callers use it to skip building an argument that
      *  every entry point would immediately throw away. */
     public static boolean isAvailable() {
@@ -138,7 +138,7 @@ public final class CustomCropsCompat {
             }
             Object potId = a.potConfigId.invoke(pot);
             Object whitelist = a.potWhitelist.invoke(config);
-            return whitelist instanceof java.util.Set<?> set && set.contains(potId);
+            return whitelist instanceof Set<?> set && set.contains(potId);
         } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return false;
         }

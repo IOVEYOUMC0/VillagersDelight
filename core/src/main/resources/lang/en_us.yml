@@ -10,6 +10,7 @@ messages:
   inventory_open: "[VillagersDelight] That villager inventory is already open"
   villager_unavailable: "[VillagersDelight] The villager is currently unavailable"
   inventory_opened: "[VillagersDelight] Villager inventory opened; changes save when closed"
-  config_invalid: "[VillagersDelight] Configuration error; previous valid configuration kept: {error}"
+  config_invalid: "Configuration error; previous valid configuration kept: {error}"
+  config_loaded: "Loaded {crops} crop rules, {harvest_drops} harvest-drop groups, {pickup_foods} pickup foods and {compost_items} compost items"
   no_permission: "[VillagersDelight] You do not have permission to use this command"
   inventory_failed: "[VillagersDelight] Failed to open the villager inventory; check the server log"
