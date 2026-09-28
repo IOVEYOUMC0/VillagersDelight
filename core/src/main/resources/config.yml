@@ -1,8 +1,13 @@
-# Debug模式，用于调试村民行为。
-debug: false
+# Config generation, informational only: the plugin does not read this key and never rewrites
+# config.yml after the first copy is created, so it documents which shipped generation produced the
+# surrounding layout. It is not an upgrade guard. Do not edit by hand.
+config-version: 1
+
+# VillagersDelight configuration
+# 村民行为接管、拾取、堆肥与作物识别的注入配置。
 
 # 控制台和命令消息语言。可选 zh_cn、en_us；留空跟随系统语言。
-language: zh_cn
+language: ''
 
 # 是否接入 CustomCrops 的 BLOCK 模式作物。
 custom-crops:
@@ -52,7 +57,7 @@ crops:
 
 # 永不识别的作物 id（黑名单，叠加在 crops 清单之上）。
 disabled-crops:
-  # No entries.
+  # 无条目。
   []
 # 额外土壤：所有上方列出的作物默认都可种在这些方块上（原版耕地始终允许）。
 extra-soils:
@@ -95,7 +100,7 @@ pickup:
   enabled: true
   use-datapack-tag: true
   crops:
-    # No entries.
+    # 无条目。
     []
   foods:
     - farmersdelight:cabbage
@@ -113,8 +118,10 @@ compost-items:
   - farmersdelight:onion
   - farmersdelight:rice_panicle
 
-# Optional tuning for the injected farmer behaviours. Values below preserve the defaults.
+# 注入的农民行为的可选调参。下列数值即默认值。
+# debug: 输出村民行为的调试日志（旧的顶层 debug 键仍会被读取）。
 villager-ai:
+  debug: false
   food:
     enabled: true
     check-chance: 0.05

@@ -203,7 +203,9 @@ public final class VillagersDelightConfig {
                 pickupFoods,
                 yaml.getBoolean("pickup.use-datapack-tag", true),
                 compostItems,
-                yaml.getBoolean("debug", false),
+                // The switch moved under villager-ai (the shipped layout); an upgraded config still has the
+                // old top-level debug key, which stays the fallback.
+                yaml.getBoolean("villager-ai.debug", yaml.getBoolean("debug", false)),
                 yaml.getBoolean("custom-crops.enabled", true),
                 behavior,
                 foodPoints,

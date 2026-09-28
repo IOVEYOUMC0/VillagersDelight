@@ -11,15 +11,17 @@ repositories {
     maven("https://repo.momirealms.net/releases/")
 }
 
-// CraftEngine is pinned to the official Maven 26.9.1 artifacts.
+// CraftEngine is resolved from Maven. Overridable so a compatibility check can build the same sources
+// against another release without editing this file:  gradlew build -PceVersion=26.8.2
+val ceVersion = providers.gradleProperty("ceVersion").getOrElse("26.9.1")
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
     compileOnly("org.jetbrains:annotations:26.1.0")
-    // CraftEngine 26.9.1 from the official Maven repository.
-    compileOnly("net.momirealms:craft-engine-bukkit:26.9.1")
+    // CraftEngine from the official Maven repository.
+    compileOnly("net.momirealms:craft-engine-bukkit:$ceVersion")
     // The bukkit artifact no longer bundles core, so the core classes come from their own jar.
-    compileOnly("net.momirealms:craft-engine-core:26.9.1")
+    compileOnly("net.momirealms:craft-engine-core:$ceVersion")
 }
 
 java {

@@ -1,11 +1,11 @@
 package com.huidu.villagersdelight.impl214;
 
-import com.huidu.villagersdelight.common.VillagerAiSettings;
-import com.huidu.villagersdelight.common.VillagerCollectWantedItem;
-import com.huidu.villagersdelight.common.VillagerItems;
-import com.huidu.villagersdelight.common.VillagerUseBonemeal;
-import com.huidu.villagersdelight.common.VillagerWantedItemSensor;
-import com.huidu.villagersdelight.common.VillagerWorkAtComposter;
+import com.huidu.villagersdelight.impl214.common.VillagerAiSettings;
+import com.huidu.villagersdelight.impl214.common.VillagerCollectWantedItem;
+import com.huidu.villagersdelight.impl214.common.VillagerItems;
+import com.huidu.villagersdelight.impl214.common.VillagerUseBonemeal;
+import com.huidu.villagersdelight.impl214.common.VillagerWantedItemSensor;
+import com.huidu.villagersdelight.impl214.common.VillagerWorkAtComposter;
 import com.huidu.villagersdelight.core.VillagerAiInjector;
 import com.huidu.villagersdelight.core.VillagerFoodRules;
 import com.huidu.villagersdelight.core.VillagersDelightConfig;
@@ -110,7 +110,72 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         this.installed = false;
         brainChecks.values().forEach(io.papermc.paper.threadedregions.scheduler.ScheduledTask::cancel);
         brainChecks.clear();
+        // Withdraw before dropping the villager references: the behaviours read the static settings below
+        // on every tick, so leaving either in place would keep this layer's classes harvesting, planting
+        // and composting on behalf of a plugin that is already disabled, with a soon-dead classloader.
+        withdrawAllBehaviors();
         injectedVillagers.clear();
+        // Best-effort static state reset so a disabled plugin cannot keep feeding the behaviours rules
+        // that its own config no longer backs.
+        try {
+            VillagerAiSettings.reset();
+        } catch (RuntimeException e) {
+            VillagersDelightPlugin.debug("shutdown: villager AI settings reset failed: " + e.getMessage());
+        }
+    }
+
+    // Removes every behaviour this injector installed from every villager it touched. One failing
+    // villager must not abort the rest.
+    private void withdrawAllBehaviors() {
+        for (org.bukkit.entity.Villager villager : List.copyOf(injectedVillagers.values())) {
+            try {
+                if (!villager.isValid()) {
+                    continue;
+                }
+                if (Bukkit.isOwnedByCurrentRegion(villager)) {
+                    removeInjectedFrom(villager);
+                } else {
+                    // Entities are only readable on their owning region thread, so a villager owned by
+                    // another region is handled by its own scheduler instead of from here.
+                    villager.getScheduler().run(this.plugin, task -> removeInjectedFrom(villager), null);
+                }
+            } catch (RuntimeException e) {
+                VillagersDelightPlugin.debug("shutdown: behavior withdrawal for " + villager.getUniqueId()
+                        + " failed: " + e.getMessage());
+            }
+        }
+    }
+
+    private static void removeInjectedFrom(org.bukkit.entity.Villager villager) {
+        Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) villager).getHandle();
+        // removeBehavior and removeEmptyGates already contain their own failure handling, so a
+        // villager whose brain cannot be read leaves the remaining ones to be withdrawn.
+        for (Class<?> type : injectedBehaviorTypes()) {
+            removeBehavior(handle.getBrain(), type);
+        }
+        removeEmptyGates(handle.getBrain());
+    }
+
+    // The injected behaviour classes are private to this layer, so shutdown resolves them by simple name
+    // through the layer's own class loader. A name that does not exist in a layer is skipped so the
+    // remaining behaviours are still withdrawn.
+    private static Set<Class<?>> injectedBehaviorTypes() {
+        Set<Class<?>> types = new java.util.HashSet<>();
+        ClassLoader loader = NmsVillagerAi.class.getClassLoader();
+        for (String name : new String[]{
+                "VillagerFarmBehavior",
+                "VillagerUseBonemeal",
+                "VillagerWorkAtComposter",
+                "VillagerTradeWithVillager",
+                "VillagerCollectWantedItem",
+                "VillagerConfiguredFood"}) {
+            try {
+                types.add(loader.loadClass(NmsVillagerAi.class.getPackageName() + "." + name));
+            } catch (ClassNotFoundException | LinkageError e) {
+                VillagersDelightPlugin.debug("shutdown: injected behavior " + name + " not resolvable: " + e);
+            }
+        }
+        return types;
     }
 
     @Override
@@ -136,6 +201,9 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
     @Override
     public void setCustomIdPickup(boolean enabled) {
+        if (CUSTOM_ID_PICKUP == enabled) {
+            return;
+        }
         if (!enabled) {
             // Switch back to legacy datapack-tag pickup: withdraw the injected collect behaviour so a
             // CE item the widened tag already admits is not collected twice. The flag flips only once the
@@ -143,6 +211,13 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             uninstallBehaviors(Set.of(VillagerCollectWantedItem.class));
         }
         CUSTOM_ID_PICKUP = enabled;
+        if (enabled) {
+            // The spawn, entity-load, career-change and brain-rebuild paths are what normally install the
+            // collect behaviour, and none of them re-runs for a villager that already exists. Without this
+            // pass, switching use-datapack-tag off only stops new installs and the mode stays inert until
+            // the villagers reload. The flag is already set, so a villager replaced concurrently installs it.
+            installCollectBehavior(VillagerCollectWantedItem.class);
+        }
     }
 
     @Override
@@ -173,6 +248,71 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         removeEmptyGates(handle.getBrain());
     }
 
+    // Install side of the collect behaviour for villagers that already exist. uninstallBehaviors is the
+    // symmetric withdrawal; this exists because every other install path is tied to a villager lifecycle
+    // event (spawn, entity load, career change, brain rebuild) that a running villager never fires again.
+    private void installCollectBehavior(Class<?> behaviorType) {
+        for (org.bukkit.entity.Villager villager : List.copyOf(injectedVillagers.values())) {
+            if (!villager.isValid()) {
+                injectedVillagers.remove(villager.getUniqueId());
+                continue;
+            }
+            try {
+                if (Bukkit.isOwnedByCurrentRegion(villager)) {
+                    addCollectIfMissing(villager, behaviorType);
+                } else {
+                    // The brain is only touched on the villager's own region thread, same as the
+                    // withdrawal path: reading another region's entity state from here is not
+                    // region-safe. The behaviour is still mode-gated, so a task that runs late after
+                    // another switch is a no-op.
+                    villager.getScheduler().run(this.plugin, task -> addCollectIfMissing(villager, behaviorType), null);
+                }
+            } catch (RuntimeException e) {
+                // One unusable villager must not abort the pass; the rest still need the behaviour.
+                VillagersDelightPlugin.debug("install: " + behaviorType.getSimpleName()
+                        + " for " + villager.getUniqueId() + " failed: " + e.getMessage());
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addCollectIfMissing(org.bukkit.entity.Villager villager, Class<?> behaviorType) {
+        try {
+            if (!CUSTOM_ID_PICKUP
+                    || villager.getProfession() != org.bukkit.entity.Villager.Profession.FARMER) {
+                return;
+            }
+            Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) villager).getHandle();
+            Map<Integer, Map<Activity, Set<BehaviorControl<?>>>> byPriority =
+                    (Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>) AVAILABLE_BEHAVIORS_BY_PRIORITY.get(handle.getBrain());
+            if (byPriority == null) {
+                return;
+            }
+            boolean installed = byPriority.values().stream()
+                    .map(activities -> activities.get(Activity.CORE))
+                    .filter(java.util.Objects::nonNull)
+                    .flatMap(Set::stream)
+                    .anyMatch(behaviorType::isInstance);
+            if (installed) {
+                return;
+            }
+            for (Map<Activity, Set<BehaviorControl<?>>> activities : byPriority.values()) {
+                Set<BehaviorControl<?>> core = activities.get(Activity.CORE);
+                if (core != null) {
+                    core.add(new VillagerCollectWantedItem());
+                    return;
+                }
+            }
+            // No CORE activity set to attach to: the villager's next replace() still installs it once
+            // the mode flag is set.
+            VillagersDelightPlugin.debug("install: no CORE activity for " + villager.getUniqueId());
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError t) {
+            VillagersDelightPlugin.debug("install: " + behaviorType.getSimpleName()
+                    + " for " + villager.getUniqueId() + " failed: " + t);
+        }
+    }
+
+    // Removes any behavior whose runtime class equals behaviorType from every activity set, descending
     // Removes any behavior whose runtime class equals behaviorType from every activity set, descending
     // into GateBehavior shuffling lists. Exact class match keeps it idempotent (a replaced behavior's
     // class differs from the original, so it is never removed twice). Returns the number removed.

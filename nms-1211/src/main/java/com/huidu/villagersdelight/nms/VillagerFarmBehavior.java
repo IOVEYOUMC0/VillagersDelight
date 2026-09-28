@@ -1,7 +1,7 @@
 package com.huidu.villagersdelight.impl1211;
 
-import com.huidu.villagersdelight.common.VillagerAiSettings;
-import com.huidu.villagersdelight.common.VillagerBlockAccess;
+import com.huidu.villagersdelight.impl1211.common.VillagerAiSettings;
+import com.huidu.villagersdelight.impl1211.common.VillagerBlockAccess;
 import com.huidu.villagersdelight.core.CeBlockAccess;
 import com.huidu.villagersdelight.core.CeItemAccess;
 import com.huidu.villagersdelight.core.CustomCropsCompat;
@@ -417,25 +417,34 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
     }
 
     private void breakCeBlock(ServerLevel level, BlockPos pos) {
-        // FD crops drop through CraftEngine's "on break" event functions (drop_loot), not through
-        // block.loot(). Trigger the BREAK event with a player-less context so the configured loot
-        // drops; player-dependent entries (fortune, has_player) fall back to their base drops.
+        // A crop declares its drops in one of two places: a block loot table (wheat, beetroots, carrots,
+        // potatoes, onions, cabbages and the budding tomato all use default:loot_table/seed_crop) or the
+        // "on break" event functions (rice and any addon that builds its loot with drop_loot). A player break
+        // produces both - CraftEngine runs the event functions and its block-loot listener replaces the vanilla
+        // drops with the loot table - so a villager harvest has to drop both as well, with a player-less context
+        // so player-dependent entries (fortune, has_player) fall back to their base drops.
         ImmutableBlockState ceState = VillagerBlockAccess.ceStateAt(level, pos);
+        int dropped = 0;
         if (ceState != null) {
             try {
                 net.momirealms.craftengine.core.world.World ceWorld =
                         net.momirealms.craftengine.bukkit.api.BukkitAdaptor.adapt(level.getWorld());
                 WorldPosition position = new WorldPosition(ceWorld,
                         pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
-                PlayerOptionalContext context = PlayerOptionalContext.of(null, ContextHolder.builder()
+                ContextHolder.Builder builder = ContextHolder.builder()
                         .withParameter(DirectContextParameters.BLOCK,
                                 new net.momirealms.craftengine.bukkit.world.BukkitExistingBlock(
                                         level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ())))
                         .withParameter(DirectContextParameters.POSITION, position)
-                        .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState));
-                Function.execute(context, ceState.owner().value().eventFunctions(EventTrigger.BLOCK_BREAK));
+                        .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState);
+                for (net.momirealms.craftengine.core.item.Item item : ceState.getDrops(builder.build(), ceWorld, null)) {
+                    ceWorld.dropItemNaturally(position, item);
+                    dropped++;
+                }
+                Function.execute(PlayerOptionalContext.of(null, builder),
+                        ceState.owner().value().eventFunctions(EventTrigger.BLOCK_BREAK));
             } catch (RuntimeException | LinkageError t) {
-                VillagersDelightPlugin.debug("harvest: CE break event drop failed at " + pos + ": " + t);
+                VillagersDelightPlugin.debug("harvest: CE break drop failed at " + pos + ": " + t);
             }
         }
         // Break particles and sound. The BLOCK_BREAK_EFFECT level event drives the client break
@@ -444,6 +453,9 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
         BlockState state = level.getBlockState(pos);
         level.levelEvent(net.minecraft.world.level.block.LevelEvent.PARTICLES_DESTROY_BLOCK, pos, Block.getId(state));
         CeBlockAccess.removeBlock(level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ()));
+        // Reported so a missing drop is visible in the debug log instead of only being noticed in game.
+        VillagersDelightPlugin.debug("harvest: " + (dropped == 0 ? "no loot table drops" : dropped + " loot table drop(s)")
+                + " at " + pos);
     }
 
     private boolean plantSeeds(ServerLevel level, Villager villager, BlockPos pos) {
@@ -599,9 +611,14 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
         if (placeState instanceof BlockState blockState
                 && CraftEventFactory.callEntityChangeBlockEvent(villager, pos, blockState)) {
             Location location = new Location(level.getWorld(), pos.getX(), pos.getY(), pos.getZ());
-            CeBlockAccess.placeCrop(location, plantBlock, 0, true);
-            level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(villager, level.getBlockState(pos)));
-            return true;
+            // Report the real placement result: a refused placement (protection plugin, position taken
+            // since canPlantHere ran) must not report success, because plantSeeds shrinks the seed stack
+            // on true and the villager would lose the seed without a block appearing.
+            if (CeBlockAccess.placeCrop(location, plantBlock, 0, true)) {
+                level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(villager, level.getBlockState(pos)));
+                return true;
+            }
+            VillagersDelightPlugin.debug("plant: CE place refused " + plantBlock + " at " + pos);
         }
         return false;
     }

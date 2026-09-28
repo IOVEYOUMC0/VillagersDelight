@@ -16,7 +16,9 @@ repositories {
 // copy of the core classes (each module compiles ../core/src into itself so the versioned jars stay
 // standalone), so the merge keeps the FIRST copy and the core jar must be listed first: nms-26 compiles
 // core at release 25 for MC 26.x, and letting that copy win would make the plugin's own main class
-// unloadable on the Java 21 servers the other two NMS layers target.
+// unloadable on the Java 21 servers the other two NMS layers target. The shared NMS behaviour classes
+// (../nms-common) are relocated into each layer's own package by the modules themselves, so the merge
+// cannot collapse them to a single dev-bundle-specific copy.
 val coreJar = file("../core/build/libs/villagersdelight-core-0.1.0.jar")
 val nms26Jar = file("../nms-26/build/libs/villagersdelight-0.1.0-26.jar")
 val nms1211Jar = file("../nms-1211/build/libs/villagersdelight-0.1.0-1.21.11.jar")
@@ -68,6 +70,18 @@ tasks.shadowJar {
             check(major == javaTwentyOneMajor) {
                 "Merged jar's main class is class file version $major, expected $javaTwentyOneMajor " +
                     "(Java 21). The core classes were taken from an NMS jar built for a newer release."
+            }
+            // Every layer must have survived the merge with its own behaviour classes. A single shared
+            // copy is compiled against one dev bundle only, and the method descriptors it references
+            // (BlockState.is changed between 26.x and the 1.21.4-1.21.11 line) do not exist on the
+            // other servers, which surfaces as NoSuchMethodError per villager at runtime.
+            listOf("impl26", "impl1211", "impl214").forEach { layer ->
+                check(zip.getEntry("com/huidu/villagersdelight/$layer/common/VillagerWorkAtComposter.class")
+                    != null
+                ) {
+                    "Merged jar has no $layer copy of the shared NMS behaviour classes; the merge " +
+                        "collapsed them and that layer would run another version's bytecode."
+                }
             }
         }
     }

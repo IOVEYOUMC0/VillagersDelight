@@ -43,4 +43,24 @@ public final class VillagerAiSettings {
         FARM_STOP_COOLDOWN = settings.farmStopCooldownTicks();
         FARM_WORK_DURATION = settings.farmWorkDurationTicks();
     }
+
+    /**
+     * Restores every tunable to its built-in default. Called while the plugin shuts down so behaviour
+     * instances still referenced by villager brains read neutral values instead of the disabled
+     * plugin's last configuration.
+     */
+    public static void reset() {
+        FOOD_RULES = VillagerFoodRules.EMPTY;
+        COMPOST_IDS = Set.of();
+        COMPOST_CHANCE = 0.3F;
+        FOOD_ENABLED = true;
+        FOOD_CHECK_CHANCE = 0.05;
+        COMPOST_MAX_ITEMS = 20;
+        COMPOST_MINIMUM_KEPT = 32;
+        BONEMEAL_RETRY_DELAY = 40;
+        BONEMEAL_WORK_DURATION = 80;
+        FARM_RETARGET_DELAY = 20;
+        FARM_STOP_COOLDOWN = 40;
+        FARM_WORK_DURATION = 200;
+    }
 }

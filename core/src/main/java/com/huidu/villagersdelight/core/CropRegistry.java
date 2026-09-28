@@ -52,6 +52,13 @@ public final class CropRegistry {
         return instance;
     }
 
+    // Drops the snapshot so the static lookups answer null instead of serving crops from a plugin that is
+    // no longer enabled. Any injected behaviour still referenced by a villager brain then treats the
+    // block as an unknown crop rather than acting on stale rules.
+    public static void reset() {
+        instance = null;
+    }
+
     // Fast path for the NMS layer: resolves the crop behind a raw NMS block state, or null.
     @Nullable
     public static FDCrop cropOf(ImmutableBlockState state) {

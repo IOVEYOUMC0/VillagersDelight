@@ -1,8 +1,8 @@
 package com.huidu.villagersdelight.impl1211;
 
 import com.google.common.collect.ImmutableSet;
-import com.huidu.villagersdelight.common.VillagerAiSettings;
-import com.huidu.villagersdelight.common.VillagerItems;
+import com.huidu.villagersdelight.impl1211.common.VillagerAiSettings;
+import com.huidu.villagersdelight.impl1211.common.VillagerItems;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.LivingEntity;

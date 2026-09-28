@@ -278,6 +278,10 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         this.openBackpackVillagers.clear();
         this.pickupIds = Set.of();
         this.injectedBaseMaterials = Set.of();
+        // The behaviours injected into live villager brains keep reading this shared state after the
+        // injector withdrew them, so it has to fall back to the built-in defaults rather than to the
+        // configuration of a plugin that is no longer running.
+        CropRegistry.reset();
         instance = null;
     }
 
@@ -525,6 +529,15 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             this.aiInjector.setCustomIdPickup(customIdPickup);
             if (customIdPickup) {
                 getLogger().info("Pickup: custom-id mode active; skipping the villager_picks_up data pack.");
+                // The pack written while datapack-tag mode was active keeps widening the vanilla pickup
+                // tag until the file is gone; the injector only stops installing the collect behaviour,
+                // so the operator has to be told to remove it.
+                if (PickupEnabler.dataPackWritten()) {
+                    getLogger().warning("Pickup: the villager_picks_up data pack written earlier is still"
+                            + " installed and keeps widening the pickup tag; delete"
+                            + " <world>/datapacks/villagersdelight/ and restart the server so only the"
+                            + " custom-id mode applies.");
+                }
             } else {
                 PickupEnabler.apply(this, this.config);
             }

@@ -26,7 +26,17 @@ import java.util.Set;
 // therefore keep a vanilla base material that players cannot obtain or place (e.g. knowledge book).
 public final class PickupEnabler {
 
+    // True once this JVM has written the data pack. The plugin takes the pack over only when it
+    // successfully wrote it; a pack file already present at startup belongs to the operator and is
+    // left to them, so it is not reported here.
+    private static volatile boolean dataPackWritten;
+
     private PickupEnabler() {
+    }
+
+    /** True when the villager_picks_up data pack was written during this server run. */
+    public static boolean dataPackWritten() {
+        return dataPackWritten;
     }
 
     public static void apply(VillagersDelightPlugin plugin, VillagersDelightConfig config) {
@@ -103,6 +113,7 @@ public final class PickupEnabler {
             return;
         }
         plugin.getLogger().info("Pickup: wrote villager_picks_up tag " + desired + " (data pack)");
+        dataPackWritten = true;
         if (isRegionizedServer()) {
             plugin.getLogger().warning("Pickup: data pack written; runtime data reload is disabled on regionized servers. Restart the server to apply it");
             return;
