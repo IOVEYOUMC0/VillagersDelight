@@ -9,7 +9,6 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.sensing.NearestItemSensor;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
-import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.util.Comparator;
 import java.util.List;
@@ -40,7 +39,7 @@ public final class VillagerWantedItemSensor extends NearestItemSensor {
         if (stack.isEmpty()) {
             return false;
         }
-        var custom = CeItemAccess.customItemId(CraftItemStack.asCraftMirror(stack));
+        var custom = CeItemAccess.customItemId(VillagerItems.bukkitStack(stack));
         if (custom != null) {
             return VillagersDelightPlugin.isPickupConfigured(custom.toString());
         }

@@ -73,7 +73,7 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
         ImmutableBlockState ceState = VillagerBlockAccess.ceStateAt(level, pos);
         return CropRegistry.cropOf(ceState) != null
                 && state.getBlock() instanceof BonemealableBlock bonemealable
-                && bonemealable.isValidBonemealTarget(level, pos, state);
+                && NmsCompat.isValidBonemealTarget(bonemealable, level, pos, state);
     }
 
     @Override

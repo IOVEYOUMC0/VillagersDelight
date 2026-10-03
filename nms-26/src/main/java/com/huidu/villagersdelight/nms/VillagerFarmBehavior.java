@@ -2,6 +2,7 @@ package com.huidu.villagersdelight.impl26;
 
 import com.huidu.villagersdelight.impl26.common.VillagerAiSettings;
 import com.huidu.villagersdelight.impl26.common.VillagerBlockAccess;
+import com.huidu.villagersdelight.impl26.common.VillagerItems;
 import com.huidu.villagersdelight.core.CeBlockAccess;
 import com.huidu.villagersdelight.core.CeItemAccess;
 import com.huidu.villagersdelight.core.CustomCropsCompat;
@@ -21,6 +22,7 @@ import net.minecraft.world.entity.ai.memory.WalkTarget;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.LevelEvent;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.CropBlock;
@@ -29,8 +31,11 @@ import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.material.FluidState;
+import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.util.BlockStateUtils;
+import net.momirealms.craftengine.bukkit.world.BukkitExistingBlock;
 import net.momirealms.craftengine.core.block.ImmutableBlockState;
+import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.plugin.context.ContextHolder;
 import net.momirealms.craftengine.core.plugin.context.EventTrigger;
 import net.momirealms.craftengine.core.plugin.context.function.Function;
@@ -39,12 +44,12 @@ import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextPar
 import net.momirealms.craftengine.core.entity.player.InteractionHand;
 import net.momirealms.craftengine.core.util.Key;
 import net.momirealms.craftengine.core.util.Cancellable;
+import net.momirealms.craftengine.core.world.World;
 import net.momirealms.craftengine.core.world.WorldPosition;
 import net.momirealms.craftengine.proxy.bukkit.craftbukkit.CraftWorldProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.BlockGetterProxy;
 import org.bukkit.Location;
 import org.bukkit.craftbukkit.event.CraftEventFactory;
-import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -87,7 +92,7 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
             }
             // A mirror is enough: everything below only reads the stack, and unlike asBukkitCopy it does not
             // deep-copy the component patch of every slot on every scan.
-            org.bukkit.inventory.ItemStack bukkit = CraftItemStack.asCraftMirror(stack);
+            org.bukkit.inventory.ItemStack bukkit = VillagerItems.bukkitStack(stack);
             FDCrop crop = configuredSeed(bukkit);
             String customCropsId = CustomCropsCompat.isAvailable() ? CustomCropsCompat.cropId(bukkit) : null;
             boolean vanillaSeed = this.isVanillaSeed(stack, bukkit);
@@ -128,7 +133,9 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
                 for (int z = -1; z <= 1; z++) {
                     mut.set(villager.getX() + x, villager.getY() + y, villager.getZ() + z);
                     if (this.isValidTarget(mut, level, villager)) {
-                        this.validFarmlandAroundVillager.add(new BlockPos(mut));
+                        // BlockPos lost its Vec3i/Vec3i-subtype copy constructor in 26.3, so the
+                        // coordinates are copied explicitly (this compiles on every 26.x release).
+                        this.validFarmlandAroundVillager.add(new BlockPos(mut.getX(), mut.getY(), mut.getZ()));
                     }
                 }
             }
@@ -394,14 +401,14 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
             return false;
         }
         try {
-            net.momirealms.craftengine.core.world.World ceWorld =
-                    net.momirealms.craftengine.bukkit.api.BukkitAdaptor.adapt(level.getWorld());
+            World ceWorld =
+                    BukkitAdaptor.adapt(level.getWorld());
             WorldPosition position = new WorldPosition(ceWorld,
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
             Cancellable event = Cancellable.dummy();
             PlayerOptionalContext context = PlayerOptionalContext.of(null, ContextHolder.builder()
                     .withParameter(DirectContextParameters.BLOCK,
-                            new net.momirealms.craftengine.bukkit.world.BukkitExistingBlock(
+                            new BukkitExistingBlock(
                                     level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ())))
                     .withParameter(DirectContextParameters.POSITION, position)
                     .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState)
@@ -434,17 +441,17 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
         int dropped = 0;
         if (ceState != null) {
             try {
-                net.momirealms.craftengine.core.world.World ceWorld =
-                        net.momirealms.craftengine.bukkit.api.BukkitAdaptor.adapt(level.getWorld());
+                World ceWorld =
+                        BukkitAdaptor.adapt(level.getWorld());
                 WorldPosition position = new WorldPosition(ceWorld,
                         pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
                 ContextHolder.Builder builder = ContextHolder.builder()
                         .withParameter(DirectContextParameters.BLOCK,
-                                new net.momirealms.craftengine.bukkit.world.BukkitExistingBlock(
+                                new BukkitExistingBlock(
                                         level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ())))
                         .withParameter(DirectContextParameters.POSITION, position)
                         .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState);
-                for (net.momirealms.craftengine.core.item.Item item : ceState.getDrops(builder.build(), ceWorld, null)) {
+                for (Item item : ceState.getDrops(builder.build(), ceWorld, null)) {
                     ceWorld.dropItemNaturally(position, item);
                     dropped++;
                 }
@@ -458,7 +465,7 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
         // feedback; CraftEngine intercepts it and maps the sound to the custom block's own break
         // sound, so a single call covers both effects.
         BlockState state = level.getBlockState(pos);
-        level.levelEvent(net.minecraft.world.level.block.LevelEvent.PARTICLES_DESTROY_BLOCK, pos, Block.getId(state));
+        level.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, pos, Block.getId(state));
         boolean removed = CeBlockAccess.removeBlock(
                 level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ()));
         if (!removed) {
@@ -479,7 +486,7 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
                     continue;
                 }
                 // A mirror is enough for the id lookups below, and it avoids copying the component patch.
-                org.bukkit.inventory.ItemStack bukkit = CraftItemStack.asCraftMirror(stack);
+                org.bukkit.inventory.ItemStack bukkit = VillagerItems.bukkitStack(stack);
                 if ((pass == 0) != this.isVanillaSeed(stack, bukkit)) {
                     continue;
                 }

@@ -1,6 +1,7 @@
 package com.huidu.villagersdelight.impl26;
 
 import com.google.common.collect.ImmutableSet;
+import com.huidu.villagersdelight.core.CeItemAccess;
 import com.huidu.villagersdelight.impl26.common.VillagerAiSettings;
 import com.huidu.villagersdelight.impl26.common.VillagerItems;
 import net.minecraft.server.level.ServerLevel;
@@ -14,6 +15,7 @@ import net.minecraft.world.entity.npc.villager.VillagerProfession;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import org.bukkit.Bukkit;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -28,7 +30,7 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
     protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
         if (!super.checkExtraStartConditions(level, body)) return false;
         return body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET)
-                .filter(target -> org.bukkit.Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())).isPresent();
+                .filter(target -> Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())).isPresent();
     }
 
     @Override
@@ -41,7 +43,7 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
     @Override
     protected void tick(ServerLevel level, Villager body, long timestamp) {
         Villager target = (Villager) body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).get();
-        if (!org.bukkit.Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())) return;
+        if (!Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())) return;
         if (!(body.distanceToSqr(target) > 5.0)) {
             BehaviorUtils.lockGazeAndWalkToEachOther(body, target, 0.5F, 2);
             body.gossip(level, target, timestamp);
@@ -51,7 +53,10 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
             int[] totals = VillagerItems.foodPointsAndWheat(body);
             boolean threwFood = false;
             if (totals[0] >= 24 && (isFarmer || VillagerItems.foodPointsInInventory(target) < 12)) {
-                throwHalfStack(body, Villager.FOOD_POINTS.keySet(), target, true);
+                // The food variant matches on the villager food value, not on this set: 26.3 turned
+                // Villager.FOOD_POINTS into an item component that cannot be enumerated, and the set was
+                // never read on this path (see throwHalfStack).
+                throwHalfStack(body, Set.of(), target, true);
                 threwFood = true;
             }
             if (isFarmer) {
@@ -81,8 +86,8 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
             ItemStack itemStack = inventory.getItem(i);
             if (!itemStack.isEmpty()) {
                 Item item = itemStack.getItem();
-                boolean custom = com.huidu.villagersdelight.core.CeItemAccess.customItemId(
-                        org.bukkit.craftbukkit.inventory.CraftItemStack.asCraftMirror(itemStack)) != null;
+                boolean custom = CeItemAccess.customItemId(
+                        VillagerItems.bukkitStack(itemStack)) != null;
                 if (food ? VillagerItems.foodValue(itemStack) > 0 : !custom && items.contains(item)) {
                     int count;
                     if (itemStack.getCount() > itemStack.getMaxStackSize() / 2) {

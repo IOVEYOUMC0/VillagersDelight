@@ -14,3 +14,5 @@ messages:
   config_loaded: "Loaded {crops} crop rules, {harvest_drops} harvest-drop groups, {pickup_foods} pickup foods and {compost_items} compost items"
   no_permission: "[VillagersDelight] You do not have permission to use this command"
   inventory_failed: "[VillagersDelight] Failed to open the villager inventory; check the server log"
+  disable_step_write_back_backpacks: "write back villager backpack views"
+  disable_budget_exhausted: "Shutdown budget exhausted at step '{step}'; {count} villager backpack view(s) were not written back."

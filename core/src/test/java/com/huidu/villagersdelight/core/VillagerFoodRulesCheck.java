@@ -2,6 +2,7 @@ package com.huidu.villagersdelight.core;
 
 import org.bukkit.configuration.file.YamlConfiguration;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -67,13 +68,13 @@ public final class VillagerFoodRulesCheck {
         // Old configurations inherit the new scalar defaults without overwriting their food list.
         var oldConfig = new YamlConfiguration();
         oldConfig.setDefaults(defaults);
-        oldConfig.set("pickup.foods", java.util.List.of("farmersdelight:rice", "farmersdelight:rice_panicle"));
+        oldConfig.set("pickup.foods", List.of("farmersdelight:rice", "farmersdelight:rice_panicle"));
         var inherited = VillagersDelightConfig.load(oldConfig).foodRules(Set.of());
         assert inherited.value("farmersdelight:rice") == 2;
         assert inherited.value("farmersdelight:rice_panicle") == 0;
         assert inherited.value("farmersdelight:onion") == 0;
         var legacy = new YamlConfiguration();
-        legacy.set("pickup.foods", java.util.List.of("farmersdelight:rice", "farmersdelight:rice_panicle"));
+        legacy.set("pickup.foods", List.of("farmersdelight:rice", "farmersdelight:rice_panicle"));
         var legacyRules = VillagersDelightConfig.load(legacy).foodRules(Set.of());
         assert legacyRules.value("farmersdelight:rice") == 2;
         assert legacyRules.value("farmersdelight:rice_panicle") == 0;

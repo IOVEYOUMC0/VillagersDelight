@@ -1,6 +1,7 @@
 package com.huidu.villagersdelight.impl214;
 
 import com.google.common.collect.ImmutableSet;
+import com.huidu.villagersdelight.core.CeItemAccess;
 import com.huidu.villagersdelight.impl214.common.VillagerAiSettings;
 import com.huidu.villagersdelight.impl214.common.VillagerItems;
 import net.minecraft.server.level.ServerLevel;
@@ -14,6 +15,8 @@ import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import org.bukkit.Bukkit;
+import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -28,7 +31,7 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
     protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
         if (!super.checkExtraStartConditions(level, body)) return false;
         return body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET)
-                .filter(target -> org.bukkit.Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())).isPresent();
+                .filter(target -> Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())).isPresent();
     }
 
     @Override
@@ -41,7 +44,7 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
     @Override
     protected void tick(ServerLevel level, Villager body, long timestamp) {
         Villager target = (Villager) body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).get();
-        if (!org.bukkit.Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())) return;
+        if (!Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())) return;
         if (!(body.distanceToSqr(target) > 5.0)) {
             BehaviorUtils.lockGazeAndWalkToEachOther(body, target, 0.5F, 2);
             body.gossip(level, target, timestamp);
@@ -81,8 +84,8 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
             ItemStack itemStack = inventory.getItem(i);
             if (!itemStack.isEmpty()) {
                 Item item = itemStack.getItem();
-                boolean custom = com.huidu.villagersdelight.core.CeItemAccess.customItemId(
-                        org.bukkit.craftbukkit.inventory.CraftItemStack.asCraftMirror(itemStack)) != null;
+                boolean custom = CeItemAccess.customItemId(
+                        CraftItemStack.asCraftMirror(itemStack)) != null;
                 if (food ? VillagerItems.foodValue(itemStack) > 0 : !custom && items.contains(item)) {
                     int count;
                     if (itemStack.getCount() > itemStack.getMaxStackSize() / 2) {

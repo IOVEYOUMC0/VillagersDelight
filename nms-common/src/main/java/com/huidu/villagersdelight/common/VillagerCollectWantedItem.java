@@ -9,7 +9,6 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.item.ItemStack;
-import org.bukkit.craftbukkit.inventory.CraftItemStack;
 import org.bukkit.craftbukkit.event.CraftEventFactory;
 import org.bukkit.event.entity.EntityRemoveEvent;
 
@@ -76,7 +75,7 @@ public final class VillagerCollectWantedItem extends Behavior<Villager> {
         if (stack.isEmpty()) {
             return false;
         }
-        var bukkit = CraftItemStack.asCraftMirror(stack);
+        var bukkit = VillagerItems.bukkitStack(stack);
         var custom = CeItemAccess.customItemId(bukkit);
         if (custom != null) {
             return VillagersDelightPlugin.isPickupConfigured(custom.toString());

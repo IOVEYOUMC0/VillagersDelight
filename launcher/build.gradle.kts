@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.huidu.villagersdelight"
-version = "0.1.0"
+version = "0.1.1"
 
 repositories {
     mavenCentral()
@@ -19,10 +19,10 @@ repositories {
 // unloadable on the Java 21 servers the other two NMS layers target. The shared NMS behaviour classes
 // (../nms-common) are relocated into each layer's own package by the modules themselves, so the merge
 // cannot collapse them to a single dev-bundle-specific copy.
-val coreJar = file("../core/build/libs/villagersdelight-core-0.1.0.jar")
-val nms26Jar = file("../nms-26/build/libs/villagersdelight-0.1.0-26.jar")
-val nms1211Jar = file("../nms-1211/build/libs/villagersdelight-0.1.0-1.21.11.jar")
-val nms1214Jar = file("../nms-1.21.4/build/libs/villagersdelight-0.1.0-1.21.4.jar")
+val coreJar = file("../core/build/libs/villagersdelight-core-0.1.1.jar")
+val nms26Jar = file("../nms-26/build/libs/villagersdelight-0.1.1-26.jar")
+val nms1211Jar = file("../nms-1211/build/libs/villagersdelight-0.1.1-1.21.11.jar")
+val nms1214Jar = file("../nms-1.21.4/build/libs/villagersdelight-0.1.1-1.21.4.jar")
 
 dependencies {
     implementation(files(coreJar))
@@ -45,7 +45,7 @@ val javaTwentyOneMajor = 65
 val mainClassEntry = "com/huidu/villagersdelight/core/VillagersDelightPlugin.class"
 
 tasks.shadowJar {
-    archiveFileName.set("villagersdelight-0.1.0.jar")
+    archiveFileName.set("villagersdelight-0.1.1.jar")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
     mergeServiceFiles()

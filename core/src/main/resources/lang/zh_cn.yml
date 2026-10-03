@@ -14,3 +14,5 @@ messages:
   config_loaded: "已加载 {crops} 条作物规则、{harvest_drops} 组收获掉落、{pickup_foods} 项拾取食物和 {compost_items} 项堆肥物品"
   no_permission: "[VillagersDelight] 你没有权限执行此命令"
   inventory_failed: "[VillagersDelight] 打开村民背包失败，请查看服务器日志"
+  disable_step_write_back_backpacks: "写回村民背包界面"
+  disable_budget_exhausted: "关闭预算在步骤“{step}”处耗尽；{count} 个村民背包界面未能写回。"

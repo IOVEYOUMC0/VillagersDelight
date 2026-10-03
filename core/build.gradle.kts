@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "com.huidu.villagersdelight"
-version = "0.1.0"
+version = "0.1.1"
 
 repositories {
     mavenCentral()
@@ -52,6 +52,17 @@ val checkFoodRules = tasks.register<JavaExec>("checkFoodRules") {
     enableAssertions = true
 }
 
+// The mirror factory lookup that keeps the shared nms-common sources compilable against both the
+// pre-26.3 and the 26.3 dev bundles. CraftItemStack itself only exists on a server, so this check
+// drives the resolution against stand-in classes instead - see CraftItemStackMirrorCheck.
+val checkCraftMirror = tasks.register<JavaExec>("checkCraftMirror") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.huidu.villagersdelight.core.CraftItemStackMirrorCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    enableAssertions = true
+}
+
 tasks.check {
-    dependsOn(checkFoodRules)
+    dependsOn(checkFoodRules, checkCraftMirror)
 }

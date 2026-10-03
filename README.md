@@ -37,7 +37,7 @@ Checked on 2026-09-17 against the current universal jar:
 | 1.21.11 | Builds against the matching Paper dev bundle; the universal jar carries its own `impl1211` copy of the shared behaviour classes (checked by comparing the compiled `BlockState.is` descriptor in each layer) | Full behavior regression not run in this audit |
 | 26.1.2 | Builds against the matching Paper dev bundle | Full behavior regression not run in this audit |
 | 26.2 | Existing Folia 26.2 startup log confirms `impl26` installation | Startup alone does not verify harvesting, sharing, consumption or inventory editing |
-| 26.3 | Not supported yet: compiling `nms-26` against dev bundle `26.3.build.41-alpha` fails | Six symbols changed on 26.3 — `CraftItemStack.asCraftMirror(ItemStack)`, `Villager.FOOD_POINTS`, `BonemealableBlock.isValidBonemealTarget` (now takes a `BonemealSource`), the `BlockPos(MutableBlockPos)` constructor, `ItemStack.getBukkitStack()` and `ComposterBlock.COMPOSTABLES`. A 26.3 layer is needed, and CraftEngine 26.9.1 fails on 26.3 before VillagersDelight is reached |
+| 26.3 | Builds against dev bundle `26.3.build.41-alpha`, where `asCraftMirror` no longer exists. The `impl26` copy no longer reaches the mirror through CraftEngine's proxy: `VillagerItems.bukkitStack` resolves `CraftItemStack.asBukkitMirror` and falls back to the removed `asCraftMirror`, so a server that has neither fails with an `IllegalStateException` naming the version. The live 26.3 failure was CraftEngine 26.9.1 loading but its proxy binding the removed `asCraftMirror`, which threw `NoSuchMethodError` from `VillagerWantedItemSensor.isCollectable` | Six symbols changed on 26.3 — `CraftItemStack.asCraftMirror(ItemStack)`, `Villager.FOOD_POINTS`, `BonemealableBlock.isValidBonemealTarget` (now takes a `BonemealSource`), the `BlockPos(MutableBlockPos)` constructor, `ItemStack.getBukkitStack()` and `ComposterBlock.COMPOSTABLES`. The mirror is resolved at runtime here; no 26.3 server was started for this change, so harvesting, sharing, consumption and inventory editing are not re-observed on 26.3 |
 
 Version selection and `api-version` are not binary compatibility guarantees. The 1.21.5–1.21.10
 range needs NMS adaptation and validation before it can be advertised as supported.
@@ -59,8 +59,8 @@ CraftEngine is compiled against the official Maven 26.9.1 artifacts and
 CraftEngine releases verified for this build are 26.8.2, 26.9 and 26.9.1 (every CraftEngine class and member
 the jar references resolves in all three); pass `-PceVersion=<version>` to compile against another release.
 
-Versioned output: `nms-*/build/libs/villagersdelight-0.1.0-<mc>.jar`.
+Versioned output: `nms-*/build/libs/villagersdelight-0.1.1-<mc>.jar`.
 
 Universal output: build `core` and all three NMS modules first, then run `launcher/gradlew shadowJar`.
-The merged jar is `launcher/build/libs/villagersdelight-0.1.0.jar`.
+The merged jar is `launcher/build/libs/villagersdelight-0.1.1.jar`.
 Prebuilt universal jars are available from [GitHub Releases](https://github.com/IOVEYOUMC0/VillagersDelight/releases).

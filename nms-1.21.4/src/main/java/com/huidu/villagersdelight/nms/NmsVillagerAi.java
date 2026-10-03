@@ -11,6 +11,7 @@ import com.huidu.villagersdelight.core.VillagerFoodRules;
 import com.huidu.villagersdelight.core.VillagersDelightConfig;
 import com.huidu.villagersdelight.core.VillagersDelightPlugin;
 import com.huidu.villagersdelight.core.CeItemAccess;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import net.minecraft.world.entity.ai.Brain;
 import net.minecraft.world.entity.ai.behavior.BehaviorControl;
 import net.minecraft.world.entity.ai.behavior.GateBehavior;
@@ -27,6 +28,8 @@ import net.minecraft.world.entity.ai.behavior.WorkAtComposter;
 import net.minecraft.world.entity.ai.behavior.UseBonemeal;
 import net.minecraft.world.item.ItemStack;
 import org.bukkit.Bukkit;
+import org.bukkit.craftbukkit.entity.CraftVillager;
+import org.bukkit.entity.Entity;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -38,9 +41,13 @@ import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 // Replaces the vanilla HarvestFarmland behavior in farmer-villager brains with
 // VillagerFarmBehavior. Replacement happens on spawn (covers cured zombie villagers too)
@@ -65,12 +72,12 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
     private VillagersDelightPlugin plugin;
     private boolean installed;
-    private final Map<java.util.UUID, io.papermc.paper.threadedregions.scheduler.ScheduledTask> brainChecks =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledTask> brainChecks =
+            new ConcurrentHashMap<>();
     // Villagers whose brain this injector has actually modified. Withdrawing a behaviour only has to visit
     // these, which keeps the work on each villager's own region thread instead of reading every world here.
-    private final Map<java.util.UUID, org.bukkit.entity.Villager> injectedVillagers =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, org.bukkit.entity.Villager> injectedVillagers =
+            new ConcurrentHashMap<>();
 
     private static Field findField(Class<?> clazz, String name) {
         try {
@@ -108,7 +115,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             return;
         }
         this.installed = false;
-        brainChecks.values().forEach(io.papermc.paper.threadedregions.scheduler.ScheduledTask::cancel);
+        brainChecks.values().forEach(ScheduledTask::cancel);
         brainChecks.clear();
         // Withdraw before dropping the villager references: the behaviours read the static settings below
         // on every tick, so leaving either in place would keep this layer's classes harvesting, planting
@@ -147,7 +154,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     }
 
     private static void removeInjectedFrom(org.bukkit.entity.Villager villager) {
-        Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) villager).getHandle();
+        Villager handle = ((CraftVillager) villager).getHandle();
         // removeBehavior and removeEmptyGates already contain their own failure handling, so a
         // villager whose brain cannot be read leaves the remaining ones to be withdrawn.
         for (Class<?> type : injectedBehaviorTypes()) {
@@ -160,7 +167,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     // through the layer's own class loader. A name that does not exist in a layer is skipped so the
     // remaining behaviours are still withdrawn.
     private static Set<Class<?>> injectedBehaviorTypes() {
-        Set<Class<?>> types = new java.util.HashSet<>();
+        Set<Class<?>> types = new HashSet<>();
         ClassLoader loader = NmsVillagerAi.class.getClassLoader();
         for (String name : new String[]{
                 "VillagerFarmBehavior",
@@ -184,7 +191,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     }
 
     @Override
-    public void configureCeCompost(java.util.Set<String> ceItemIds) {
+    public void configureCeCompost(Set<String> ceItemIds) {
         VillagerAiSettings.COMPOST_IDS = ceItemIds == null ? Set.of() : Set.copyOf(ceItemIds);
         VillagersDelightPlugin.debug("compost: villager CE compost items set to " + VillagerAiSettings.COMPOST_IDS);
     }
@@ -241,7 +248,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     }
 
     private static void removeFrom(org.bukkit.entity.Villager villager, Set<Class<?>> behaviorTypes) {
-        Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) villager).getHandle();
+        Villager handle = ((CraftVillager) villager).getHandle();
         for (Class<?> type : behaviorTypes) {
             removeBehavior(handle.getBrain(), type);
         }
@@ -282,7 +289,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                     || villager.getProfession() != org.bukkit.entity.Villager.Profession.FARMER) {
                 return;
             }
-            Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) villager).getHandle();
+            Villager handle = ((CraftVillager) villager).getHandle();
             Map<Integer, Map<Activity, Set<BehaviorControl<?>>>> byPriority =
                     (Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>) AVAILABLE_BEHAVIORS_BY_PRIORITY.get(handle.getBrain());
             if (byPriority == null) {
@@ -290,7 +297,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             }
             boolean installed = byPriority.values().stream()
                     .map(activities -> activities.get(Activity.CORE))
-                    .filter(java.util.Objects::nonNull)
+                    .filter(Objects::nonNull)
                     .flatMap(Set::stream)
                     .anyMatch(behaviorType::isInstance);
             if (installed) {
@@ -429,7 +436,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntitiesLoad(EntitiesLoadEvent event) {
-        for (org.bukkit.entity.Entity entity : event.getEntities()) {
+        for (Entity entity : event.getEntities()) {
             if (entity instanceof org.bukkit.entity.Villager villager) {
                 this.replace(villager);
             }
@@ -443,7 +450,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             return;
         }
         try {
-            Villager handle = ((org.bukkit.craftbukkit.entity.CraftVillager) bukkitVillager).getHandle();
+            Villager handle = ((CraftVillager) bukkitVillager).getHandle();
             Brain<Villager> brain = handle.getBrain();
             Map<Integer, Map<Activity, Set<BehaviorControl<?>>>> byPriority =
                     (Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>) AVAILABLE_BEHAVIORS_BY_PRIORITY.get(brain);
@@ -455,12 +462,12 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             boolean farmer = bukkitVillager.getProfession() == org.bukkit.entity.Villager.Profession.FARMER;
             boolean foodBehaviorInstalled = byPriority.values().stream()
                     .map(activities -> activities.get(Activity.CORE))
-                    .filter(java.util.Objects::nonNull)
+                    .filter(Objects::nonNull)
                     .flatMap(Set::stream)
                     .anyMatch(VillagerConfiguredFood.class::isInstance);
             boolean collectBehaviorInstalled = byPriority.values().stream()
                     .map(activities -> activities.get(Activity.CORE))
-                    .filter(java.util.Objects::nonNull)
+                    .filter(Objects::nonNull)
                     .flatMap(Set::stream)
                     .anyMatch(VillagerCollectWantedItem.class::isInstance);
 

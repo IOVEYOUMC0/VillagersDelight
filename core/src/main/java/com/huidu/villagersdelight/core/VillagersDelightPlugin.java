@@ -271,8 +271,11 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             }
         }
         if (skipped > 0) {
-            getLogger().warning("Shutdown budget exhausted; " + skipped
-                    + " villager backpack view(s) were not written back.");
+            // Same wording family as FarmersDelight's shutdown budget: the language layer names the step and
+            // says what did not happen, instead of a hardcoded English sentence.
+            getLogger().warning(language.get("messages.disable_budget_exhausted",
+                    "step", language.get("messages.disable_step_write_back_backpacks"),
+                    "count", skipped));
         }
         this.openBackpackViews.clear();
         this.openBackpackVillagers.clear();
