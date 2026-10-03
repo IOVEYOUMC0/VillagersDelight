@@ -132,7 +132,7 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     /**
      * One NMS layer plus the server classes that identify the versions it was compiled against.
      * "Does the layer class load?" is not a version probe: every layer's entry class only names symbols
-     * that exist across the whole 1.21.4-26.x range, so the first candidate always loaded and the
+     * that exist across the whole 1.21.5-26.x range, so the first candidate always loaded and the
      * version-specific classes it references only blew up later, per villager, with no fallback left.
      */
     private record NmsCandidate(String className, List<String> serverVersionPrefixes,
@@ -166,8 +166,8 @@ public final class VillagersDelightPlugin extends JavaPlugin {
                     List.of("1.21.11"),
                     List.of("net.minecraft.world.level.block.FarmBlock",
                             "net.minecraft.world.entity.npc.villager.Villager")),
-            new NmsCandidate("com.huidu.villagersdelight.impl214.NmsVillagerAi",
-                    List.of("1.21.4"),
+            new NmsCandidate("com.huidu.villagersdelight.impl215.NmsVillagerAi",
+                    List.of("1.21.5", "1.21.6", "1.21.7", "1.21.8", "1.21.9", "1.21.10"),
                     List.of("net.minecraft.world.level.block.FarmBlock",
                             "net.minecraft.world.entity.npc.Villager")));
 

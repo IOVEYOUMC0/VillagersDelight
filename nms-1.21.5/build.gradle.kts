@@ -18,7 +18,7 @@ repositories {
 val ceVersion = providers.gradleProperty("ceVersion").getOrElse("26.9.1")
 
 dependencies {
-    paperweight.paperDevBundle("1.21.4-R0.1-SNAPSHOT")
+    paperweight.paperDevBundle("1.21.5-R0.1-SNAPSHOT")
     compileOnly("org.jetbrains:annotations:26.1.0")
     // CraftEngine from the official Maven repository.
     compileOnly("net.momirealms:craft-engine-bukkit:$ceVersion")
@@ -32,7 +32,7 @@ dependencies {
 // into a layer-specific package: all three layers are merged into one plugin jar, and a single shared
 // com.huidu.villagersdelight.common copy can only be built against one dev bundle (26.x widened
 // BlockState.is to Object), so it would fail with NoSuchMethodError on the servers of the other layers.
-// 1.21.4 also keeps Villager in net.minecraft.world.entity.npc, while the shared sources use the
+// 1.21.5 also keeps Villager in net.minecraft.world.entity.npc, while the shared sources use the
 // 1.21.11+ npc.villager package, so that import is rewritten in the same pass. Sync keeps the
 // generated folder free of stale files.
 val layerNmsSources = layout.buildDirectory.dir("generated/nms-common")
@@ -40,7 +40,7 @@ val prepareLayerNmsSources = tasks.register<Sync>("prepareLayerNmsSources") {
     from("../nms-common/src/main/java")
     into(layerNmsSources)
     filter { line: String ->
-        line.replace("com.huidu.villagersdelight.common", "com.huidu.villagersdelight.impl214.common")
+        line.replace("com.huidu.villagersdelight.common", "com.huidu.villagersdelight.impl215.common")
             .replace("net.minecraft.world.entity.npc.villager.Villager", "net.minecraft.world.entity.npc.Villager")
     }
 }
@@ -71,7 +71,7 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.shadowJar {
     archiveBaseName.set("villagersdelight")
-    archiveClassifier.set("1.21.4")
+    archiveClassifier.set("1.21.5")
 }
 
 tasks.jar {

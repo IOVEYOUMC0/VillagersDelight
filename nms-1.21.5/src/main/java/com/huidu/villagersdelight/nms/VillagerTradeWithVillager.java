@@ -1,9 +1,9 @@
-package com.huidu.villagersdelight.impl214;
+package com.huidu.villagersdelight.impl215;
 
 import com.google.common.collect.ImmutableSet;
 import com.huidu.villagersdelight.core.CeItemAccess;
-import com.huidu.villagersdelight.impl214.common.VillagerAiSettings;
-import com.huidu.villagersdelight.impl214.common.VillagerItems;
+import com.huidu.villagersdelight.impl215.common.VillagerAiSettings;
+import com.huidu.villagersdelight.impl215.common.VillagerItems;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.LivingEntity;
@@ -48,7 +48,7 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
         if (!(body.distanceToSqr(target) > 5.0)) {
             BehaviorUtils.lockGazeAndWalkToEachOther(body, target, 0.5F, 2);
             body.gossip(level, target, timestamp);
-            boolean isFarmer = body.getVillagerData().getProfession() == VillagerProfession.FARMER;
+            boolean isFarmer = body.getVillagerData().profession().is(VillagerProfession.FARMER);
             // Both counts come from one inventory pass; the food throw can take wheat with it, so the wheat
             // count is only refreshed when that throw actually ran.
             int[] totals = VillagerItems.foodPointsAndWheat(body);
@@ -70,8 +70,8 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
     }
 
     private static Set<Item> figureOutWhatIAmWillingToTrade(Villager myBody, Villager target) {
-        ImmutableSet<Item> targetItems = target.getVillagerData().getProfession().requestedItems();
-        ImmutableSet<Item> selfItems = myBody.getVillagerData().getProfession().requestedItems();
+        ImmutableSet<Item> targetItems = target.getVillagerData().profession().value().requestedItems();
+        ImmutableSet<Item> selfItems = myBody.getVillagerData().profession().value().requestedItems();
         return targetItems.stream().filter(entry -> !selfItems.contains(entry)).collect(Collectors.toSet());
     }
 

@@ -197,7 +197,7 @@ public final class PickupEnabler {
 
     private static final int MAX_RANGE_FORMAT = 150;
 
-    // 1.21.4 exposes getPackVersion(PackType) returning an int; 26.x renamed it to packVersion(PackType)
+    // 1.21.5 exposes getPackVersion(PackType) returning an int; 26.x renamed it to packVersion(PackType)
     // and returns a PackFormat record. Both are reached reflectively so one jar covers the whole range.
     private static PackFormat serverDataPackFormat() {
         try {
@@ -244,13 +244,10 @@ public final class PickupEnabler {
         return null;
     }
 
-    // Data pack format history: 1.21.4=61, 1.21.5=71, 1.21.6/7/8=80; 1.21.9 and every 26.x release use
+    // Data pack format history: 1.21.5=71, 1.21.6/7/8=80; 1.21.9 and every 26.x release use
     // the min_format/max_format range form (88 is the 1.21.9 data pack major format).
     private static PackFormat fallbackPackFormat() {
         String version = Bukkit.getBukkitVersion();
-        if (version.contains("1.21.4")) {
-            return new PackFormat(61, false);
-        }
         if (version.contains("1.21.5")) {
             return new PackFormat(71, false);
         }

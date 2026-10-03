@@ -12,4 +12,4 @@ pluginManagement {
     }
 }
 
-rootProject.name = "villagersdelight-nms-1.21.4"
+rootProject.name = "villagersdelight-nms-1.21.5"

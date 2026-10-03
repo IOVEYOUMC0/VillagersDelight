@@ -14,40 +14,43 @@ bread, carrots, potatoes and beetroot still use Minecraft's own consumption logi
 ## Modules
 
 - `core/` — version-agnostic: crop index over CraftEngine, CE block access, config, plugin lifecycle.
-- `nms-1.21.4/` — paperweight build for MC 1.21.4, produces the final plugin jar (bundles core).
+- `nms-1.21.5/` — paperweight build for MC 1.21.5, the lower bound of the 1.21.5–1.21.10 layer; produces the final plugin jar (bundles core).
 - `nms-1211/` — paperweight build for MC 1.21.11, produces the final plugin jar (bundles core).
 - `nms-26/` — paperweight build for MC 26.x (26.1.2), produces the final plugin jar.
 - `launcher/` — merges core and all versioned implementations into one universal plugin jar.
 
 The shared NMS behaviour sources (`nms-common/`) are compiled into a layer-specific package
-(`impl214.common`, `impl1211.common`, `impl26.common`). One merged jar carries all three layers, so a
+(`impl215.common`, `impl1211.common`, `impl26.common`). One merged jar carries all three layers, so a
 single shared copy of those classes could only ever match one dev bundle: 26.x widened
-`BlockState.is`/`ItemStack.is` to `Object`, which does not exist on 1.21.4/1.21.11.
+`BlockState.is`/`ItemStack.is` to `Object`, which does not exist on 1.21.5/1.21.11.
 
 Install either the universal launcher jar or exactly one versioned jar matching the server version.
 
 ## Compatibility verification
 
-Checked on 2026-09-17 against the current universal jar:
+Layer coverage, and how far each row has actually been verified. The `nms-1211` and `nms-26` rows
+record the 2026-09-17 audit; the `nms-1.21.5` row is the current 1.21.5 rebase, whose build and live
+smoke test are still pending:
 
-| Minecraft | Evidence | Limit |
-| --- | --- | --- |
-| 1.21.4 | Builds against the matching Paper dev bundle | Full behavior regression not run in this audit |
-| 1.21.5–1.21.10 | Unsupported | No NMS layer is selected; the 1.21.4 implementation is not reused because its `VillagerData.getProfession()` call is absent on these versions |
-| 1.21.11 | Builds against the matching Paper dev bundle; the universal jar carries its own `impl1211` copy of the shared behaviour classes (checked by comparing the compiled `BlockState.is` descriptor in each layer) | Full behavior regression not run in this audit |
-| 26.1.2 | Builds against the matching Paper dev bundle | Full behavior regression not run in this audit |
-| 26.2 | Existing Folia 26.2 startup log confirms `impl26` installation | Startup alone does not verify harvesting, sharing, consumption or inventory editing |
-| 26.3 | Builds against dev bundle `26.3.build.41-alpha`, where `asCraftMirror` no longer exists. The `impl26` copy no longer reaches the mirror through CraftEngine's proxy: `VillagerItems.bukkitStack` resolves `CraftItemStack.asBukkitMirror` and falls back to the removed `asCraftMirror`, so a server that has neither fails with an `IllegalStateException` naming the version. The live 26.3 failure was CraftEngine 26.9.1 loading but its proxy binding the removed `asCraftMirror`, which threw `NoSuchMethodError` from `VillagerWantedItemSensor.isCollectable` | Six symbols changed on 26.3 — `CraftItemStack.asCraftMirror(ItemStack)`, `Villager.FOOD_POINTS`, `BonemealableBlock.isValidBonemealTarget` (now takes a `BonemealSource`), the `BlockPos(MutableBlockPos)` constructor, `ItemStack.getBukkitStack()` and `ComposterBlock.COMPOSTABLES`. The mirror is resolved at runtime here; no 26.3 server was started for this change, so harvesting, sharing, consumption and inventory editing are not re-observed on 26.3 |
+| Minecraft | Layer | Evidence | Limit |
+| --- | --- | --- | --- |
+| 1.21.5–1.21.10 | `nms-1.21.5` (compile anchor 1.21.5) | This layer is the implementation for the whole range. Its sources were checked against the 1.21.5 mappings: `VillagerData` is a record whose `profession()` returns `Holder<VillagerProfession>`, and `Villager`/`VillagerProfession` still live in `npc`. 1.21.6–1.21.10 select the same layer by version prefix; they have no per-version dev bundle, and 1.21.9/1.21.10 are refused at startup by the `npc.Villager` probe because the class moved to `npc.villager.Villager` | Not smoke-tested above 1.21.5, and the 1.21.5 build itself has not been run yet |
+| 1.21.11 | `nms-1211` | Builds against the matching Paper dev bundle; the universal jar carries its own `impl1211` copy of the shared behaviour classes (checked by comparing the compiled `BlockState.is` descriptor in each layer) | Full behavior regression not run in this audit |
+| 26.1.2 | `nms-26` | Builds against the matching Paper dev bundle | Full behavior regression not run in this audit |
+| 26.2 | `nms-26` | Existing Folia 26.2 startup log confirms `impl26` installation | Startup alone does not verify harvesting, sharing, consumption or inventory editing |
+| 26.3 | `nms-26` | Builds against dev bundle `26.3.build.41-alpha`, where `asCraftMirror` no longer exists. The `impl26` copy no longer reaches the mirror through CraftEngine's proxy: `VillagerItems.bukkitStack` resolves `CraftItemStack.asBukkitMirror` and falls back to the removed `asCraftMirror`, so a server that has neither fails with an `IllegalStateException` naming the version. The live 26.3 failure was CraftEngine 26.9.1 loading but its proxy binding the removed `asCraftMirror`, which threw `NoSuchMethodError` from `VillagerWantedItemSensor.isCollectable` | Six symbols changed on 26.3 — `CraftItemStack.asCraftMirror(ItemStack)`, `Villager.FOOD_POINTS`, `BonemealableBlock.isValidBonemealTarget` (now takes a `BonemealSource`), the `BlockPos(MutableBlockPos)` constructor, `ItemStack.getBukkitStack()` and `ComposterBlock.COMPOSTABLES`. The mirror is resolved at runtime here; no 26.3 server was started for this change, so harvesting, sharing, consumption and inventory editing are not re-observed on 26.3 |
 
-Version selection and `api-version` are not binary compatibility guarantees. The 1.21.5–1.21.10
-range needs NMS adaptation and validation before it can be advertised as supported.
+Version selection and `api-version` are not binary compatibility guarantees, but they are not the same
+thing as being unsupported either. The layers are `nms-1.21.5` for 1.21.5–1.21.10 (lower bound
+1.21.5), `nms-1211` for 1.21.11+, and `nms-26` for 26.x. What the 1.21.6–1.21.10 part of the range
+still lacks is a per-version build and a live run, not an implementation.
 
 ## Build
 
 Each module is an independent Gradle project (paperweight versions are bound to the MC version,
 so they cannot share one build). Run `./gradlew shadowJar` inside the module you need.
 
-- `nms-1.21.4` — Java 21 toolchain, Gradle 9.0, dev bundle `1.21.4-R0.1-SNAPSHOT`.
+- `nms-1.21.5` — Java 21 toolchain, Gradle 9.0, dev bundle `1.21.5-R0.1-SNAPSHOT`.
 - `nms-1211` — Java 21 toolchain, Gradle 9.1, dev bundle `1.21.11-R0.1-SNAPSHOT`.
 - `nms-26` — Java 25 toolchain (auto-downloaded via foojay), Gradle 9.1, dev bundle
   `26.1.2.build.74-stable`. MC 26.1+ requires Java 25, so this module compiles with release 25.

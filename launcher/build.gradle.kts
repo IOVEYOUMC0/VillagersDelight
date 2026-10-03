@@ -22,13 +22,13 @@ repositories {
 val coreJar = file("../core/build/libs/villagersdelight-core-0.1.1.jar")
 val nms26Jar = file("../nms-26/build/libs/villagersdelight-0.1.1-26.jar")
 val nms1211Jar = file("../nms-1211/build/libs/villagersdelight-0.1.1-1.21.11.jar")
-val nms1214Jar = file("../nms-1.21.4/build/libs/villagersdelight-0.1.1-1.21.4.jar")
+val nms1215Jar = file("../nms-1.21.5/build/libs/villagersdelight-0.1.1-1.21.5.jar")
 
 dependencies {
     implementation(files(coreJar))
     implementation(files(nms26Jar))
     implementation(files(nms1211Jar))
-    implementation(files(nms1214Jar))
+    implementation(files(nms1215Jar))
 }
 
 tasks.withType<JavaCompile>().configureEach {
@@ -53,7 +53,7 @@ tasks.shadowJar {
     doFirst {
         // Require every input JAR so duplicate filtering cannot select newer-Java core classes
         // from an NMS module when the Java 21 core artifact is missing.
-        listOf(coreJar, nms26Jar, nms1211Jar, nms1214Jar).forEach { jar ->
+        listOf(coreJar, nms26Jar, nms1211Jar, nms1215Jar).forEach { jar ->
             check(jar.isFile) {
                 "Missing input jar ${jar.path}. Build core and all three NMS modules before the launcher."
             }
@@ -73,9 +73,9 @@ tasks.shadowJar {
             }
             // Every layer must have survived the merge with its own behaviour classes. A single shared
             // copy is compiled against one dev bundle only, and the method descriptors it references
-            // (BlockState.is changed between 26.x and the 1.21.4-1.21.11 line) do not exist on the
+            // (BlockState.is changed between 26.x and the 1.21.5-1.21.11 line) do not exist on the
             // other servers, which surfaces as NoSuchMethodError per villager at runtime.
-            listOf("impl26", "impl1211", "impl214").forEach { layer ->
+            listOf("impl26", "impl1211", "impl215").forEach { layer ->
                 check(zip.getEntry("com/huidu/villagersdelight/$layer/common/VillagerWorkAtComposter.class")
                     != null
                 ) {

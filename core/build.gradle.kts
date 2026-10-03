@@ -16,7 +16,7 @@ repositories {
 val ceVersion = providers.gradleProperty("ceVersion").getOrElse("26.9.1")
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:1.21.5-R0.1-SNAPSHOT")
     compileOnly("org.jetbrains:annotations:26.1.0")
     // CraftEngine from the official Maven repository.
     compileOnly("net.momirealms:craft-engine-bukkit:$ceVersion")
