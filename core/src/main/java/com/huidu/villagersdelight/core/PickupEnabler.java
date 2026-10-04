@@ -125,7 +125,7 @@ public final class PickupEnabler {
                 plugin.getLogger().warning("Pickup: this server does not support runtime data reload; restart it to apply the data pack");
                 return;
             }
-            // Reloading resources is async; verify a moment later so the log tells us whether the
+            // Reloading resources is async; verify a moment later so the log shows whether the
             // injected tag actually became visible to the vanilla tag registry.
             Bukkit.getGlobalRegionScheduler().runDelayed(plugin, verifyTask -> verifyInjectedTags(plugin, desired), 100L);
         }, 40L);

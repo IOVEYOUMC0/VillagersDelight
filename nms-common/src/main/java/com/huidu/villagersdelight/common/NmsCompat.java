@@ -31,7 +31,7 @@ import java.util.Optional;
 /**
  * The one place where villager-relevant Minecraft changes between the supported releases are
  * absorbed. The behaviour sources under nms-common are compiled into every layer, so they
- * have to compile against every layer's dev bundle <em>and</em> run on every server that layer
+ * have to compile against every layer's dev bundle and run on every server that layer
  * targets; a member that exists on some of those releases and not on others is exactly the kind of
  * difference that belongs behind a single documented seam instead of at each call site.
  *
@@ -54,7 +54,7 @@ import java.util.Optional;
  * Every lookup happens once, in the static initialiser, and a member that cannot be found is not
  * an error: it means the running server predates that change, so the other branch of the pair runs.
  * Only the 26.3 side of each pair is version-specific, which is why a failed lookup is silently
- * null here but a failed <em>call</em> throws.
+ * null here but a failed call throws.
  */
 public final class NmsCompat {
 

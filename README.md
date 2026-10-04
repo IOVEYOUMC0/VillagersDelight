@@ -86,6 +86,10 @@ Prebuilt universal jars are available from [GitHub Releases](https://github.com/
 VillagersDelight is **original to this project** — it is not a port of any mod, and it has no upstream
 project or upstream authors to credit.
 
+Its own code is licensed under the **GNU Affero General Public License v3.0 only** (AGPL-3.0), whose full
+text is the root `LICENSE`. It ports no upstream content, so there is no third-party attribution to carry
+alongside it.
+
 It is the NMS-side companion to the FarmersDelight plugin, not a CraftEngine content pack: each
 Minecraft version gets its own jar built against that version's Paper dev bundle (paperweight), and the
 `launcher` module merges those layers into one universal jar. See [Modules](#modules) for the layer
