@@ -1,4 +1,17 @@
-# VillagersDelight
+<h1 align="center">VillagersDelight</h1>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Minecraft-1.21.5%20%E2%80%93%2026.x-3fb950" alt="Minecraft 1.21.5 – 26.x">
+  <img src="https://img.shields.io/badge/Java-21%20%2F%2025-orange" alt="Java 21 / 25">
+  <img src="https://img.shields.io/badge/Paper%20%2F%20Purpur-supported-blueviolet" alt="Paper / Purpur">
+  <img src="https://img.shields.io/badge/CraftEngine-26.9.1-5865F2" alt="CraftEngine 26.9.1">
+</p>
+
+<p align="center"><i>Makes farmer villagers recognise and farm CraftEngine-based custom crops on Paper/Purpur servers.</i></p>
+
+---
+
+## About
 
 Makes farmer villagers recognise and farm CraftEngine-based custom crops (FarmersDelight crops,
 rich soil farmland, etc.) on Paper/Purpur servers. Extends vanilla farming and social food sharing;
@@ -67,3 +80,13 @@ Versioned output: `nms-*/build/libs/villagersdelight-0.1.1-<mc>.jar`.
 Universal output: build `core` and all three NMS modules first, then run `launcher/gradlew shadowJar`.
 The merged jar is `launcher/build/libs/villagersdelight-0.1.1.jar`.
 Prebuilt universal jars are available from [GitHub Releases](https://github.com/IOVEYOUMC0/VillagersDelight/releases).
+
+## Credits
+
+VillagersDelight is **original to this project** — it is not a port of any mod, and it has no upstream
+project or upstream authors to credit.
+
+It is the NMS-side companion to the FarmersDelight plugin, not a CraftEngine content pack: each
+Minecraft version gets its own jar built against that version's Paper dev bundle (paperweight), and the
+`launcher` module merges those layers into one universal jar. See [Modules](#modules) for the layer
+layout and [Build](#build) for the toolchains.
