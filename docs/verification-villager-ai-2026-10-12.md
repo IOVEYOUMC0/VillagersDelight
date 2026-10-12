@@ -1,5 +1,7 @@
 # Live backpack and vanilla AI verification
 
+Follow-up: these 17 runtime assertions did not cover full-inventory composting. Core seed exclusion was found and fixed separately; see the [compost verification](verification-compost-2026-10-12.md).
+
 Verified on 2026-10-12. The backpack uses the villager's real eight slots through a native chest menu; closing releases the session without writing an old copy back. Slot nine rejects pickup, placement and Shift merging. Access requires both entities to belong to the current region.
 
 Vanilla checks used each layer's mapped Paper sources: HarvestFarmland, WorkAtComposter, UseBonemeal, TradeWithVillager, InventoryCarrier, VillagerGoalPackages and SecondaryPoiSensor. Fixes preserve native planting sounds, profession guards, pickup permissions/events, profession secondary POIs and the default compost reserve of ten. Removing replacement behaviors restores the native class and Gate weight; recorded sensors are restored only into the original Brain. Vanilla food consumption and unrelated activities remain native.

@@ -475,7 +475,7 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             getLogger().info("NMS layer not installed; skipping the villager pickup data pack.");
         }
         augmentFarmerPickup(registry, this.config);
-        configureCompost(registry, this.config);
+        configureCompost(this.config);
         if (this.aiInjector != null) {
             this.aiInjector.configureBehavior(this.config.behaviorSettings());
         }
@@ -590,27 +590,14 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         this.aiInjector.configureFoodItems(cfg.foodRules(protectedSeeds));
     }
 
-    // Passes the compost-items configuration to the NMS layer: villagers can compost the configured
-    // CE items (matched by their CE custom id, never by base material) into bone meal. The vanilla
-    // COMPOSTABLES table stays untouched, so base materials of CE items are not made compostable.
-    // Each call replaces the configured set, so /vd reload applies edits immediately.
-    private void configureCompost(CropRegistry registry, VillagersDelightConfig cfg) {
+    // Match configured CE ids without widening vanilla compost rules; the NMS loop keeps seed reserves.
+    private void configureCompost(VillagersDelightConfig cfg) {
         if (this.aiInjector == null) {
             return;
         }
         Set<String> ids = new HashSet<>();
         for (Key item : cfg.compostItems()) {
             ids.add(item.toString());
-        }
-        // Seeds are production stock, never compost surplus.  Keeping this guard here means a
-        // mistaken compost-items entry cannot slowly erase a crop's only replanting source.
-        if (registry != null) {
-            for (FDCrop crop : registry.allCrops()) {
-                Key seed = crop.seedItem();
-                if (seed != null) {
-                    ids.remove(seed.toString());
-                }
-            }
         }
         this.aiInjector.configureCeCompost(ids);
     }

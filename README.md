@@ -52,7 +52,7 @@ compatibility guarantee.
 | 1.21.9 / 1.21.10 | `nms-1.21.5` selected | Startup probe rejects the moved Villager class | Currently unsupported |
 | 1.21.11 | `nms-1211` | Matching Paper build passed, layer-specific shared classes bundled | No live run in this check |
 | 26.1.2 | `nms-26` | Matching Paper build and three native inventory/behavior tests passed | No new live run on this patch |
-| 26.2 | `nms-26` | Purpur 26.2-2622 passed 17 native menu, harvest/replant and pickup assertions; prior Folia startup passed | Client interaction, natural full-day schedules and live Folia cross-region tests pending |
+| 26.2 | `nms-26` | Purpur 26.2-2622 passed 17 native menu/farming/pickup and 28 separate compost assertions; prior Folia startup passed | Client interaction, natural full-day schedules and live Folia cross-region tests pending |
 | 26.3 | `nms-26` | Earlier compile check passed; compatibility helpers handle known mirror/component changes | Not rebuilt against 26.3 or run on it in this check; compatible CE required |
 
 The backpack's first eight slots are the villager's live inventory; closing does not write a snapshot
@@ -62,6 +62,13 @@ the current region. Minecraft manages the native menu and cursor without an addi
 Vanilla planting sounds, profession guards, pickup checks/events, secondary POIs and the compost
 reserve are preserved. `villager-ai.compost.minimum-kept-per-item` defaults to **10**; existing
 explicit values remain unchanged. The separate custom food seed reserve defaults to 32.
+
+Configured plantable CE items are eligible for surplus composting; seed reserves apply across
+inventory slots. New defaults include cabbage seeds, tomato seeds and rice. Existing lists are not
+overwritten: add these IDs to `compost-items` if desired. Native farmers only compost surplus wheat
+and beetroot seeds; a full bag of carrots or potatoes does not force composting. A reachable, claimed
+composter and native WORK conditions are still required. The [full-inventory verification](docs/verification-compost-2026-10-12.md)
+records 28 fixed-package server assertions, including repeated scheduled composting.
 
 Only exact native behavior classes are replaced; unrelated activities and third-party subclasses
 remain in place. Removal restores native behavior classes and Gate weights, with fresh internal

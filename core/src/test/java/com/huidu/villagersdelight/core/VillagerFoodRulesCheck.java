@@ -2,6 +2,7 @@ package com.huidu.villagersdelight.core;
 
 import org.bukkit.configuration.file.YamlConfiguration;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,7 +61,14 @@ public final class VillagerFoodRulesCheck {
         var defaults = new YamlConfiguration();
         defaults.load("src/main/resources/config.yml");
         defaults.set("harvest-drops", null);
-        var modRules = VillagersDelightConfig.load(defaults).foodRules(Set.of("farmersdelight:rice"));
+        var defaultConfig = VillagersDelightConfig.load(defaults);
+        Set<String> compostIds = new HashSet<>();
+        defaultConfig.compostItems().forEach(key -> compostIds.add(key.toString()));
+        assert compostIds.containsAll(Set.of("farmersdelight:cabbage_seeds", "farmersdelight:tomato_seeds",
+                "farmersdelight:rice", "farmersdelight:onion"));
+        defaults.set("villager-ai.compost.minimum-kept-per-item", 32);
+        assert VillagersDelightConfig.load(defaults).behaviorSettings().compostMinimumKeptPerItem() == 32;
+        var modRules = defaultConfig.foodRules(Set.of("farmersdelight:rice"));
         assert modRules.value("farmersdelight:cabbage") == 1;
         assert modRules.value("farmersdelight:tomato") == 1;
         assert modRules.value("farmersdelight:onion") == 1;

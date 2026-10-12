@@ -111,8 +111,11 @@ pickup:
 
 # 村民可堆肥的额外物品。
 # 这些物品会加入村民的堆肥行为，村民收割后能把多余作物堆成骨粉用于催熟作物。
-# 默认只放入作物产物，不放种子；堆肥行为会为每种物品保留一部分库存。
+# 包含可堆肥的 FD 种子；每种物品按总库存保留 minimum-kept-per-item 个。
 compost-items:
+  - farmersdelight:cabbage_seeds
+  - farmersdelight:tomato_seeds
+  - farmersdelight:rice
   - farmersdelight:cabbage
   - farmersdelight:tomato
   - farmersdelight:onion
