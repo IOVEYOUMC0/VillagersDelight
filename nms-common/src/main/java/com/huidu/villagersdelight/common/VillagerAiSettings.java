@@ -20,7 +20,7 @@ public final class VillagerAiSettings {
     public static volatile boolean FOOD_ENABLED = true;
     public static volatile double FOOD_CHECK_CHANCE = 0.05;
     public static volatile int COMPOST_MAX_ITEMS = 20;
-    public static volatile int COMPOST_MINIMUM_KEPT = 32;
+    public static volatile int COMPOST_MINIMUM_KEPT = 10;
     public static volatile int BONEMEAL_RETRY_DELAY = 40;
     public static volatile int BONEMEAL_WORK_DURATION = 80;
     public static volatile int FARM_RETARGET_DELAY = 20;
@@ -56,7 +56,7 @@ public final class VillagerAiSettings {
         FOOD_ENABLED = true;
         FOOD_CHECK_CHANCE = 0.05;
         COMPOST_MAX_ITEMS = 20;
-        COMPOST_MINIMUM_KEPT = 32;
+        COMPOST_MINIMUM_KEPT = 10;
         BONEMEAL_RETRY_DELAY = 40;
         BONEMEAL_WORK_DURATION = 80;
         FARM_RETARGET_DELAY = 20;

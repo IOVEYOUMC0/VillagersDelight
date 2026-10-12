@@ -11,7 +11,6 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.sensing.Sensor;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.FarmBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.momirealms.craftengine.bukkit.util.BlockStateUtils;
 import net.momirealms.craftengine.core.block.ImmutableBlockState;
@@ -43,7 +42,7 @@ public final class VillagerSecondaryPoiSensor extends Sensor<Villager> {
                     if (state.isAir()) {
                         continue;
                     }
-                    if (state.getBlock() instanceof FarmBlock) {
+                    if (entity.getVillagerData().profession().value().secondaryPoi().contains(state.getBlock())) {
                         list.add(GlobalPos.of(resourceKey, blockPos1));
                         continue;
                     }

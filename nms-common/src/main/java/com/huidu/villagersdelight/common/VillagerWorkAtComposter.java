@@ -193,7 +193,13 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
         }
         ItemStack leftOver = inventory.addItem(new ItemStack(Items.BREAD, breadToMake));
         if (!leftOver.isEmpty()) {
-            body.spawnAtLocation(level, leftOver, 0.5F);
+            boolean forceDrops = body.forceDrops;
+            body.forceDrops = true;
+            try {
+                body.spawnAtLocation(level, leftOver, 0.5F);
+            } finally {
+                body.forceDrops = forceDrops;
+            }
         }
     }
 

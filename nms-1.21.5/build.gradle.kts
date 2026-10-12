@@ -42,6 +42,8 @@ val prepareLayerNmsSources = tasks.register<Sync>("prepareLayerNmsSources") {
     filter { line: String ->
         line.replace("com.huidu.villagersdelight.common", "com.huidu.villagersdelight.impl215.common")
             .replace("net.minecraft.world.entity.npc.villager.Villager", "net.minecraft.world.entity.npc.Villager")
+            .replace("get(GameRules.MOB_GRIEFING)", "getBoolean(GameRules.RULE_MOBGRIEFING)")
+            .replace("net.minecraft.world.level.gamerules.GameRules", "net.minecraft.world.level.GameRules")
     }
 }
 

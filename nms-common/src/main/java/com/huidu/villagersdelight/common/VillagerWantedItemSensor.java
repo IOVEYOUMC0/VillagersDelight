@@ -9,6 +9,8 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.sensing.NearestItemSensor;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import org.bukkit.Bukkit;
+import net.minecraft.world.entity.npc.villager.Villager;
 
 import java.util.Comparator;
 import java.util.List;
@@ -24,10 +26,9 @@ public final class VillagerWantedItemSensor extends NearestItemSensor {
     protected void doTick(ServerLevel level, Mob mob) {
         Brain<?> brain = mob.getBrain();
         List<ItemEntity> items = level.getEntitiesOfClass(ItemEntity.class,
-                mob.getBoundingBox().inflate(32.0, 16.0, 32.0), item -> item.closerThan(mob, 32.0));
-        // Drop the items this villager cannot collect before sorting: in an item-dense area the box holds far
-        // more entities than the villager would ever want, and the filter is a set lookup for CE items.
-        items.removeIf(item -> !isCollectable(mob, level, item.getItem()));
+                mob.getBoundingBox().inflate(32.0, 16.0, 32.0), item ->
+                        Bukkit.isOwnedByCurrentRegion(item.getBukkitEntity()) && item.closerThan(mob, 32.0)
+                                && isCollectable(mob, level, item.getItem()));
         items.sort(Comparator.comparingDouble(mob::distanceToSqr));
         Optional<ItemEntity> target = items.stream()
                 .filter(item -> mob.hasLineOfSight(item))
@@ -41,7 +42,8 @@ public final class VillagerWantedItemSensor extends NearestItemSensor {
         }
         var custom = CeItemAccess.customItemId(VillagerItems.bukkitStack(stack));
         if (custom != null) {
-            return VillagersDelightPlugin.isPickupConfigured(custom.toString());
+            return VillagersDelightPlugin.isPickupConfigured(custom.toString())
+                    && mob instanceof Villager villager && villager.getInventory().canAddItem(stack);
         }
         return mob.wantsToPickUp(level, stack);
     }

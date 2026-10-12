@@ -56,6 +56,7 @@ public final class VillagerFoodRulesCheck {
                 assert expected.getMessage().contains("villager-ai.food.points");
             }
         }
+        assert VillagersDelightConfig.load(new YamlConfiguration()).behaviorSettings().compostMinimumKeptPerItem() == 10;
         var defaults = new YamlConfiguration();
         defaults.load("src/main/resources/config.yml");
         defaults.set("harvest-drops", null);

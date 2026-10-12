@@ -1,6 +1,10 @@
 package com.huidu.villagersdelight.impl215;
 
 import com.huidu.villagersdelight.impl215.common.VillagerAiSettings;
+import com.huidu.villagersdelight.impl215.common.VillagerBackpack;
+import net.kyori.adventure.text.Component;
+import org.bukkit.craftbukkit.entity.CraftPlayer;
+import java.util.function.BooleanSupplier;
 import com.huidu.villagersdelight.impl215.common.VillagerCollectWantedItem;
 import com.huidu.villagersdelight.impl215.common.VillagerItems;
 import com.huidu.villagersdelight.impl215.common.VillagerUseBonemeal;
@@ -30,6 +34,8 @@ import net.minecraft.world.item.ItemStack;
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.entity.CraftVillager;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -41,7 +47,7 @@ import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -78,6 +84,19 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     // these, which keeps the work on each villager's own region thread instead of reading every world here.
     private final Map<UUID, org.bukkit.entity.Villager> injectedVillagers =
             new ConcurrentHashMap<>();
+    // Every behaviour class this injector actually put into a brain, recorded at the moment of injection.
+    // Shutdown must not resolve these by name: the shared behaviour classes are relocated into the layer
+    // package's common subpackage while this layer's own classes sit in the layer package itself, and one of
+    // them is nested here, so a name built from the layer package misses most of them and those behaviours
+    // would survive the disable.
+    private final Set<Class<?>> installedBehaviorTypes = ConcurrentHashMap.newKeySet();
+    // Restore sensors only into their original brain; both maps share the same monitor.
+    private final Map<UUID, Map<Object, Object>> replacedSensors = new HashMap<>();
+    private final Map<UUID, Brain<?>> sensorBrains = new HashMap<>();
+    // Failure warnings are cooled down per key, so a brain that keeps failing cannot flood the log while a
+    // failure still stays visible instead of dropping to a debug line nobody reads.
+    private final Map<String, Long> warnedFailures = new ConcurrentHashMap<>();
+    private static final long FAILURE_WARNING_COOLDOWN_MS = 60_000L;
 
     private static Field findField(Class<?> clazz, String name) {
         try {
@@ -107,6 +126,15 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         this.plugin = JavaPlugin.getPlugin(VillagersDelightPlugin.class);
         this.plugin.getServer().getPluginManager().registerEvents(this, this.plugin);
         this.installed = true;
+    }
+
+    @Override
+    public Inventory openBackpack(Player player,
+            org.bukkit.entity.Villager villager, Component title,
+            org.bukkit.inventory.ItemStack padding, BooleanSupplier accessible) {
+        if (!accessible.getAsBoolean()) return null;
+        return new VillagerBackpack(((CraftVillager) villager).getHandle().getInventory(),
+                CraftItemStack.asNMSCopy(padding), accessible).open(((CraftPlayer) player).getHandle(), title);
     }
 
     @Override
@@ -147,42 +175,82 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                     villager.getScheduler().run(this.plugin, task -> removeInjectedFrom(villager), null);
                 }
             } catch (RuntimeException e) {
-                VillagersDelightPlugin.debug("shutdown: behavior withdrawal for " + villager.getUniqueId()
-                        + " failed: " + e.getMessage());
+                warnFailureOnce("withdraw:" + villager.getUniqueId(), "shutdown: behavior withdrawal for "
+                        + villager.getUniqueId() + " failed: " + e.getMessage());
             }
         }
     }
 
-    private static void removeInjectedFrom(org.bukkit.entity.Villager villager) {
+    private void removeInjectedFrom(org.bukkit.entity.Villager villager) {
         Villager handle = ((CraftVillager) villager).getHandle();
+        Brain<?> brain = handle.getBrain();
+        if (handle.level() instanceof ServerLevel level) handle.getBrain().stopAll(level, handle);
         // removeBehavior and removeEmptyGates already contain their own failure handling, so a
         // villager whose brain cannot be read leaves the remaining ones to be withdrawn.
-        for (Class<?> type : injectedBehaviorTypes()) {
-            removeBehavior(handle.getBrain(), type);
+        for (Class<?> type : installedBehaviorTypes) {
+            removeBehavior(brain, type);
         }
-        removeEmptyGates(handle.getBrain());
+        removeEmptyGates(brain);
+        restoreReplacedSensors(villager.getUniqueId(), brain);
     }
 
-    // The injected behaviour classes are private to this layer, so shutdown resolves them by simple name
-    // through the layer's own class loader. A name that does not exist in a layer is skipped so the
-    // remaining behaviours are still withdrawn.
-    private static Set<Class<?>> injectedBehaviorTypes() {
-        Set<Class<?>> types = new HashSet<>();
-        ClassLoader loader = NmsVillagerAi.class.getClassLoader();
-        for (String name : new String[]{
-                "VillagerFarmBehavior",
-                "VillagerUseBonemeal",
-                "VillagerWorkAtComposter",
-                "VillagerTradeWithVillager",
-                "VillagerCollectWantedItem",
-                "VillagerConfiguredFood"}) {
-            try {
-                types.add(loader.loadClass(NmsVillagerAi.class.getPackageName() + "." + name));
-            } catch (ClassNotFoundException | LinkageError e) {
-                VillagersDelightPlugin.debug("shutdown: injected behavior " + name + " not resolvable: " + e);
+    // Puts the sensors this injector replaced back, including removing a type that had none before.
+    @SuppressWarnings("unchecked")
+    private void restoreReplacedSensors(UUID id, Brain<?> brain) {
+        Map<Object, Object> replaced;
+        synchronized (replacedSensors) {
+            replaced = replacedSensors.remove(id);
+            if (sensorBrains.remove(id) != brain) return;
+        }
+        if (replaced == null || replaced.isEmpty()) {
+            return;
+        }
+        try {
+            Map<Object, Object> sensors = (Map<Object, Object>) BRAIN_SENSORS.get(brain);
+            for (Map.Entry<Object, Object> entry : replaced.entrySet()) {
+                if (entry.getValue() == null) {
+                    sensors.remove(entry.getKey());
+                } else {
+                    sensors.put(entry.getKey(), entry.getValue());
+                }
+            }
+        } catch (IllegalAccessException e) {
+            warnFailureOnce("uninstall:sensors", "Failed to restore villager sensors: " + e.getMessage());
+        }
+    }
+
+    // Records a behaviour class the moment it is installed, so withdrawal never has to build its name.
+    private void rememberInjectedBehavior(Class<?> type) {
+        if (type != null) {
+            installedBehaviorTypes.add(type);
+        }
+    }
+
+    // Records a replaced sensor together with the value that was there before, keeping the first value so a
+    // repeated lifecycle event cannot overwrite the original with this injector's own sensor.
+    private void rememberReplacedSensor(UUID id, Object type, Object previous) {
+        synchronized (replacedSensors) {
+            Map<Object, Object> forVillager = replacedSensors.computeIfAbsent(id, key -> new HashMap<>());
+            if (!forVillager.containsKey(type)) {
+                forVillager.put(type, previous);
             }
         }
-        return types;
+    }
+
+    // One cooled warning per key: a class that keeps failing warns once a minute instead of once per villager.
+    private void warnFailureOnce(String key, String message) {
+        long now = System.currentTimeMillis();
+        Long last = warnedFailures.get(key);
+        if (last != null && now - last < FAILURE_WARNING_COOLDOWN_MS) {
+            VillagersDelightPlugin.debug(message);
+            return;
+        }
+        warnedFailures.put(key, now);
+        if (this.plugin == null) {
+            VillagersDelightPlugin.debug(message);
+        } else {
+            this.plugin.getLogger().warning(message);
+        }
     }
 
     @Override
@@ -247,7 +315,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         }
     }
 
-    private static void removeFrom(org.bukkit.entity.Villager villager, Set<Class<?>> behaviorTypes) {
+    private void removeFrom(org.bukkit.entity.Villager villager, Set<Class<?>> behaviorTypes) {
         Villager handle = ((CraftVillager) villager).getHandle();
         for (Class<?> type : behaviorTypes) {
             removeBehavior(handle.getBrain(), type);
@@ -285,8 +353,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     @SuppressWarnings("unchecked")
     private void addCollectIfMissing(org.bukkit.entity.Villager villager, Class<?> behaviorType) {
         try {
-            if (!CUSTOM_ID_PICKUP
-                    || villager.getProfession() != org.bukkit.entity.Villager.Profession.FARMER) {
+            if (!CUSTOM_ID_PICKUP) {
                 return;
             }
             Villager handle = ((CraftVillager) villager).getHandle();
@@ -301,12 +368,14 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                     .flatMap(Set::stream)
                     .anyMatch(behaviorType::isInstance);
             if (installed) {
+                rememberInjectedBehavior(behaviorType);
                 return;
             }
             for (Map<Activity, Set<BehaviorControl<?>>> activities : byPriority.values()) {
                 Set<BehaviorControl<?>> core = activities.get(Activity.CORE);
                 if (core != null) {
                     core.add(new VillagerCollectWantedItem());
+                    rememberInjectedBehavior(behaviorType);
                     return;
                 }
             }
@@ -314,16 +383,15 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             // the mode flag is set.
             VillagersDelightPlugin.debug("install: no CORE activity for " + villager.getUniqueId());
         } catch (ReflectiveOperationException | RuntimeException | LinkageError t) {
-            VillagersDelightPlugin.debug("install: " + behaviorType.getSimpleName()
+            warnFailureOnce("install:" + behaviorType.getSimpleName(), "install: " + behaviorType.getSimpleName()
                     + " for " + villager.getUniqueId() + " failed: " + t);
         }
     }
 
     // Removes any behavior whose runtime class equals behaviorType from every activity set, descending
-    // Removes any behavior whose runtime class equals behaviorType from every activity set, descending
     // into GateBehavior shuffling lists. Exact class match keeps it idempotent (a replaced behavior's
     // class differs from the original, so it is never removed twice). Returns the number removed.
-    private static int removeBehavior(Brain<?> brain, Class<?> behaviorType) {
+    private int removeBehavior(Brain<?> brain, Class<?> behaviorType) {
         try {
             Map<Integer, Map<Activity, Set<BehaviorControl<?>>>> byPriority =
                     (Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>) AVAILABLE_BEHAVIORS_BY_PRIORITY.get(brain);
@@ -339,6 +407,8 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                     for (BehaviorControl<?> control : List.copyOf(controls)) {
                         if (control.getClass() == behaviorType) {
                             controls.remove(control);
+                            BehaviorControl<?> original = vanillaBehavior(behaviorType);
+                            if (original != null) controls.add(original);
                             removed++;
                         } else if (control instanceof GateBehavior<?> gate) {
                             removed += removeNested(gate, behaviorType);
@@ -348,7 +418,8 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             }
             return removed;
         } catch (IllegalAccessException e) {
-            VillagersDelightPlugin.debug("uninstall: " + behaviorType.getSimpleName() + " failed: " + e.getMessage());
+            warnFailureOnce("uninstall:" + behaviorType.getSimpleName(),
+                    "uninstall: " + behaviorType.getSimpleName() + " failed: " + e.getMessage());
             return 0;
         }
     }
@@ -356,7 +427,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     // Recurses through a GateBehavior's weighted entries, removing exact-class matches. An entry that
     // is itself a GateBehavior is descended into.
     @SuppressWarnings("unchecked")
-    private static int removeNested(GateBehavior<?> gate, Class<?> behaviorType) {
+    private int removeNested(GateBehavior<?> gate, Class<?> behaviorType) {
         int removed = 0;
         try {
             ShufflingList<?> list = (ShufflingList<?>) GATE_BEHAVIORS.get(gate);
@@ -365,21 +436,28 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                 ShufflingList.WeightedEntry<?> entry = entries.get(i);
                 Object data = entry.getData();
                 if (data instanceof BehaviorControl<?> control && control.getClass() == behaviorType) {
-                    entries.remove(i);
+                    BehaviorControl<?> original = vanillaBehavior(behaviorType);
+                    if (original == null) {
+                        entries.remove(i);
+                    } else {
+                        entries.set(i, (ShufflingList.WeightedEntry<?>)
+                                WEIGHTED_ENTRY_CTOR.newInstance(original, entry.getWeight()));
+                    }
                     removed++;
                 } else if (data instanceof GateBehavior<?> innerGate) {
                     removed += removeNested(innerGate, behaviorType);
                 }
             }
         } catch (ReflectiveOperationException e) {
-            VillagersDelightPlugin.debug("uninstall: nested " + behaviorType.getSimpleName() + " failed: " + e.getMessage());
+            warnFailureOnce("uninstall:nested:" + behaviorType.getSimpleName(),
+                    "uninstall: nested " + behaviorType.getSimpleName() + " failed: " + e.getMessage());
         }
         return removed;
     }
 
     // Removes GateBehaviors that became empty after unloading their injected entries. Top-level empty
     // sets are left alone: vanilla repopulates those per activity; only vacated gates are harmful.
-    private static void removeEmptyGates(Brain<?> brain) {
+    private void removeEmptyGates(Brain<?> brain) {
         try {
             Map<Integer, Map<Activity, Set<BehaviorControl<?>>>> byPriority =
                     (Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>) AVAILABLE_BEHAVIORS_BY_PRIORITY.get(brain);
@@ -399,7 +477,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                 }
             }
         } catch (IllegalAccessException e) {
-            VillagersDelightPlugin.debug("uninstall: empty-gate scan failed: " + e.getMessage());
+            warnFailureOnce("uninstall:gates", "uninstall: empty-gate scan failed: " + e.getMessage());
         }
     }
 
@@ -452,6 +530,11 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         try {
             Villager handle = ((CraftVillager) bukkitVillager).getHandle();
             Brain<Villager> brain = handle.getBrain();
+            synchronized (replacedSensors) {
+                if (sensorBrains.put(bukkitVillager.getUniqueId(), brain) != brain) {
+                    replacedSensors.remove(bukkitVillager.getUniqueId());
+                }
+            }
             Map<Integer, Map<Activity, Set<BehaviorControl<?>>>> byPriority =
                     (Map<Integer, Map<Activity, Set<BehaviorControl<?>>>>) AVAILABLE_BEHAVIORS_BY_PRIORITY.get(brain);
             if (byPriority == null) {
@@ -471,16 +554,20 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                     .flatMap(Set::stream)
                     .anyMatch(VillagerCollectWantedItem.class::isInstance);
 
-            if (farmer) {
-                // Install the extra-soil aware secondary-POI sensor so a pure CE farm populates SECONDARY_JOB_SITE.
+            // Every profession can collect shared food; only farmers need extra soil detection.
+            {
                 try {
                     Map<Object, Object> sensors = (Map<Object, Object>) BRAIN_SENSORS.get(brain);
                     // Keep the sensor replacement idempotent for repeated entity lifecycle events.
-                    if (!(sensors.get(SensorType.SECONDARY_POIS) instanceof VillagerSecondaryPoiSensor)) {
+                    if (farmer && !(sensors.get(SensorType.SECONDARY_POIS) instanceof VillagerSecondaryPoiSensor)) {
+                        rememberReplacedSensor(bukkitVillager.getUniqueId(), SensorType.SECONDARY_POIS,
+                                sensors.get(SensorType.SECONDARY_POIS));
                         sensors.put(SensorType.SECONDARY_POIS, new VillagerSecondaryPoiSensor());
                     }
-                    // Restrict wanted-item detection to configured seeds so villagers ignore same-base items.
+                    // CE identities must not admit plain items with the same base material.
                     if (!(sensors.get(SensorType.NEAREST_ITEMS) instanceof VillagerWantedItemSensor)) {
+                        rememberReplacedSensor(bukkitVillager.getUniqueId(), SensorType.NEAREST_ITEMS,
+                                sensors.get(SensorType.NEAREST_ITEMS));
                         sensors.put(SensorType.NEAREST_ITEMS, new VillagerWantedItemSensor());
                     }
                 } catch (IllegalAccessException e) {
@@ -493,13 +580,13 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                 if (core != null) {
                     if (!foodBehaviorInstalled) {
                         core.add(new VillagerConfiguredFood());
+                        rememberInjectedBehavior(VillagerConfiguredFood.class);
                         foodBehaviorInstalled = true;
                     }
-                    // In custom-id mode the collect behaviour snaps up configured CE items that the
-                    // vanilla tag path cannot admit. It is farmer-only and gated on the mode so legacy
-                    // datapack-tag pickup (which already lets CE items in) never double-collects.
-                    if (farmer && CUSTOM_ID_PICKUP && !collectBehaviorInstalled) {
+                    // Legacy datapack pickup is handled by vanilla.
+                    if (CUSTOM_ID_PICKUP && !collectBehaviorInstalled) {
                         core.add(new VillagerCollectWantedItem());
+                        rememberInjectedBehavior(VillagerCollectWantedItem.class);
                         collectBehaviorInstalled = true;
                     }
                 }
@@ -508,6 +595,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                     for (BehaviorControl<?> control : List.copyOf(controls)) {
                         BehaviorControl<?> replacement = replacementFor(control, farmer);
                         if (replacement != control) {
+                            rememberInjectedBehavior(replacement.getClass());
                             controls.remove(control);
                             controls.add(replacement);
                             replaced++;
@@ -543,6 +631,10 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             }, () -> {
                 brainChecks.remove(id);
                 injectedVillagers.remove(id);
+                synchronized (replacedSensors) {
+                    replacedSensors.remove(id);
+                    sensorBrains.remove(id);
+                }
             }, 1L + Math.floorMod(id.hashCode(), 100), 100L);
         });
     }
@@ -611,6 +703,14 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
         }
     }
 
+    private static BehaviorControl<?> vanillaBehavior(Class<?> type) {
+        if (type == VillagerFarmBehavior.class) return new HarvestFarmland();
+        if (type == VillagerUseBonemeal.class) return new UseBonemeal();
+        if (type == VillagerWorkAtComposter.class) return new WorkAtComposter();
+        if (type == VillagerTradeWithVillager.class) return new TradeWithVillager();
+        return null;
+    }
+
     private BehaviorControl<?> replacementFor(BehaviorControl<?> control, boolean farmer) {
         if (control.getClass() == TradeWithVillager.class) return new VillagerTradeWithVillager();
         if (farmer) {
@@ -633,6 +733,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                 if (data instanceof BehaviorControl<?> control) {
                     BehaviorControl<?> replacement = replacementFor(control, farmer);
                     if (replacement != control) {
+                        rememberInjectedBehavior(replacement.getClass());
                         entries.set(i, (ShufflingList.WeightedEntry<?>) WEIGHTED_ENTRY_CTOR.newInstance(replacement, entry.getWeight()));
                         replaced++;
                     } else if (data instanceof GateBehavior<?> innerGate) {

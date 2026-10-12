@@ -85,3 +85,19 @@ tasks.jar {
 tasks.build {
     dependsOn(tasks.shadowJar)
 }
+
+dependencies {
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+configurations.testImplementation {
+    extendsFrom(configurations.compileOnly.get())
+}
+
+tasks.test {
+    useJUnitPlatform()
+    enableAssertions = true
+    workingDir = layout.buildDirectory.dir("test-runtime").get().asFile
+    doFirst { workingDir.mkdirs() }
+}

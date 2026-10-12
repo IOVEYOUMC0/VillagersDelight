@@ -11,10 +11,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Villager;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -40,9 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 public final class VillagersDelightPlugin extends JavaPlugin {
@@ -53,13 +51,11 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     private VillagerAiInjector aiInjector;
     private VillagersDelightConfig config;
     private final VillagersDelightLanguage language = new VillagersDelightLanguage(this);
-    // The open backpack view plus the villager's inventory as it was at open time, so on close only the
-    // slots the player actually changed are written back (AI-mutated slots are left alone). Keyed on the
-    // view inventory; concurrent because open/click/close run on different players' region threads.
+    // Native menus edit live inventories; sessions only guard ownership and concurrent viewers.
     private final Map<Inventory, BackpackSession> openBackpackViews = new ConcurrentHashMap<>();
     private final Set<UUID> openBackpackVillagers = ConcurrentHashMap.newKeySet();
 
-    private record BackpackSession(Villager villager, UUID villagerId, ItemStack[] snapshot) {
+    private record BackpackSession(Player player, Villager villager, UUID villagerId) {
     }
     // Configured seed/food identities (CE custom ids and vanilla material keys) villagers may pick up,
     // and the vanilla base materials VillagersDelight injected into the villager_picks_up tag for CE
@@ -233,47 +229,17 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         scheduleConfigRetryIfNeeded();
     }
 
-    // VillagersDelight has no FarmersDelight dependency, so it carries its own deadline rather than
-    // the shared ShutdownBudget from the FD api.
-    private static final long BACKPACK_FLUSH_BUDGET_MILLIS = 5000L;
-
     @Override
     public void onDisable() {
         if (this.aiInjector != null) {
             this.aiInjector.shutdown();
             this.aiInjector = null;
         }
-        // The server disables plugins BEFORE kicking players, so the quit-driven InventoryCloseEvent
-        // never reaches BackpackCloseListener: dropping the sessions here would keep whatever the player
-        // pulled out of the villager while the villager kept its old contents. Flush inline first --
-        // scheduled tasks no longer run at this point.
-        // Budgeted: a villager whose region refuses the write must not stall the whole shutdown, and
-        // every remaining session shares one deadline rather than waiting in turn.
-        long deadline = System.nanoTime()
-                + TimeUnit.MILLISECONDS.toNanos(BACKPACK_FLUSH_BUDGET_MILLIS);
-        int skipped = 0;
-        for (Map.Entry<Inventory, BackpackSession> entry
-                : new ArrayList<>(this.openBackpackViews.entrySet())) {
-            if (System.nanoTime() >= deadline) {
-                skipped++;
-                continue;
-            }
-            applyBackpackEdits(entry.getValue(), entry.getKey(), false);
-            for (HumanEntity viewer : List.copyOf(entry.getKey().getViewers())) {
-                try {
-                    viewer.closeInventory();
-                } catch (RuntimeException ignored) {
-                    // A viewer in another region may refuse the close; the write-back already happened.
-                }
-            }
+        for (BackpackSession session : List.copyOf(this.openBackpackViews.values())) {
+            Player player = session.player();
+            if (Bukkit.isOwnedByCurrentRegion(player)) player.closeInventory();
         }
-        if (skipped > 0) {
-            // Same wording family as FarmersDelight's shutdown budget: the language layer names the step and
-            // says what did not happen, instead of a hardcoded English sentence.
-            getLogger().warning(language.get("messages.disable_budget_exhausted",
-                    "step", language.get("messages.disable_step_write_back_backpacks"),
-                    "count", skipped));
-        }
+        // Foreign-region menus close through their native validity check without a write-back.
         this.openBackpackViews.clear();
         this.openBackpackVillagers.clear();
         this.pickupIds = Set.of();
@@ -424,71 +390,35 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             sender.sendMessage(language.component("messages.inventory_open"));
             return true;
         }
-        // Inventory state belongs to the villager's region. Build the view only after a snapshot has
-        // been captured there, then switch to the player's region for the inventory API calls.
-        // EntityScheduler.schedule returns false for an already retired entity WITHOUT running the
-        // retired callback, so the null return has to be handled here or the guard entry never clears.
-        ScheduledTask opening;
-        try {
-            opening = targetVillager.getScheduler().run(this, task -> {
-                try {
-                    int villagerSize = targetVillager.getInventory().getSize();
-                    ItemStack[] snapshot = new ItemStack[villagerSize];
-                    for (int i = 0; i < villagerSize; i++) {
-                        ItemStack item = targetVillager.getInventory().getItem(i);
-                        snapshot[i] = item == null ? null : item.clone();
-                    }
-                    ScheduledTask playerOpen = player.getScheduler().run(this,
-                            playerTask -> openBackpackView(player, targetVillager, villagerId, snapshot),
-                            () -> openBackpackVillagers.remove(villagerId));
-                    if (playerOpen == null) {
-                        openBackpackVillagers.remove(villagerId);
-                        getLogger().warning("Player became unavailable before villager backpack could open: "
-                                + player.getUniqueId());
-                    }
-                } catch (RuntimeException e) {
-                    openBackpackVillagers.remove(villagerId);
-                    player.getScheduler().run(this,
-                            playerTask -> player.sendMessage(language.component("messages.inventory_failed")), null);
-                    getLogger().warning("Failed to read villager backpack for " + villagerId + ": " + e.getMessage());
-                }
-            }, () -> {
-                openBackpackVillagers.remove(villagerId);
-                player.getScheduler().run(this,
-                        playerTask -> player.sendMessage(language.component("messages.villager_unavailable")), null);
-            });
-        } catch (RuntimeException e) {
-            opening = null;
-            getLogger().warning("Failed to schedule villager backpack for " + villagerId + ": " + e.getMessage());
-        }
-        if (opening == null) {
-            openBackpackVillagers.remove(villagerId);
-            sender.sendMessage(language.component("messages.inventory_failed"));
-        }
+        openBackpackView(player, targetVillager, villagerId);
         return true;
     }
 
-    private void openBackpackView(Player player, Villager villager,
-                                  UUID villagerId, ItemStack[] snapshot) {
+    private boolean canAccessBackpack(Player player, Villager villager) {
+        return isEnabled() && Bukkit.isOwnedByCurrentRegion(player)
+                && Bukkit.isOwnedByCurrentRegion(villager) && villager.isValid();
+    }
+
+    private void openBackpackView(Player player, Villager villager, UUID villagerId) {
+        if (!canAccessBackpack(player, villager)) {
+            this.openBackpackVillagers.remove(villagerId);
+            player.sendMessage(language.component("messages.region_unavailable"));
+            return;
+        }
         try {
-            int villagerSize = snapshot.length;
-            int viewSize = Math.max(9, ((villagerSize + 8) / 9) * 9);
-            Inventory view = getServer().createInventory(null, viewSize,
-                    language.component("messages.inventory_title"));
-            for (int i = 0; i < villagerSize; i++) {
-                view.setItem(i, snapshot[i]);
+            ItemStack placeholder = new ItemStack(Material.BARRIER);
+            ItemMeta meta = placeholder.getItemMeta();
+            meta.displayName(language.component("messages.locked_slot"));
+            placeholder.setItemMeta(meta);
+            Inventory view = this.aiInjector == null ? null : this.aiInjector.openBackpack(player, villager,
+                    language.component("messages.inventory_title"), placeholder,
+                    () -> canAccessBackpack(player, villager));
+            if (view == null) {
+                this.openBackpackVillagers.remove(villagerId);
+                player.sendMessage(language.component("messages.inventory_failed"));
+                return;
             }
-            if (viewSize > villagerSize) {
-                ItemStack placeholder = new ItemStack(Material.BARRIER);
-                ItemMeta meta = placeholder.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(language.component("messages.locked_slot"));
-                    placeholder.setItemMeta(meta);
-                }
-                view.setItem(viewSize - 1, placeholder);
-            }
-            this.openBackpackViews.put(view, new BackpackSession(villager, villagerId, snapshot));
-            player.openInventory(view);
+            this.openBackpackViews.put(view, new BackpackSession(player, villager, villagerId));
             player.sendMessage(language.component("messages.inventory_opened"));
         } catch (RuntimeException e) {
             this.openBackpackVillagers.remove(villagerId);
@@ -685,104 +615,50 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         this.aiInjector.configureCeCompost(ids);
     }
 
-    /**
-     * Writes a backpack view back onto the villager. Only slots the player actually changed are copied,
-     * so slots the villager's AI touched while the view was open survive.
-     *
-     * @param viaScheduler true for the normal close path (hop to the villager's region); false at plugin
-     *                     disable, where scheduled tasks never run and the write must happen inline.
-     */
-    private void applyBackpackEdits(BackpackSession session, Inventory view,
-                                    boolean viaScheduler) {
-        Villager villager = session.villager();
-        ItemStack[] snapshot = session.snapshot();
-        int size = Math.min(snapshot.length, view.getSize());
-        ItemStack[] edited = new ItemStack[size];
-        boolean[] changed = new boolean[size];
-        for (int i = 0; i < size; i++) {
-            ItemStack now = view.getItem(i);
-            if (!Objects.equals(now, snapshot[i])) {
-                changed[i] = true;
-                edited[i] = now == null ? null : now.clone();
-            }
-        }
-        Runnable write = () -> {
-            Inventory inv = villager.getInventory();
-            for (int i = 0; i < size && i < inv.getSize(); i++) {
-                if (changed[i]) {
-                    inv.setItem(i, edited[i]);
-                }
-            }
-        };
-        if (!viaScheduler) {
-            try {
-                write.run();
-            } catch (RuntimeException t) {
-                getLogger().warning("Failed to write a villager backpack back on disable: " + t);
-            }
-            this.openBackpackVillagers.remove(session.villagerId());
-            return;
-        }
-        // Same null return as above. The write-back is the step that removes from the villager what the
-        // player already took, so dropping it silently would leave a duplicate rather than lose an edit.
-        ScheduledTask writeBack =
-                villager.getScheduler().run(this, task -> {
-            try {
-                write.run();
-            } finally {
-                this.openBackpackVillagers.remove(session.villagerId());
-            }
-        }, () -> this.openBackpackVillagers.remove(session.villagerId()));
-        if (writeBack == null) {
-            this.openBackpackVillagers.remove(session.villagerId());
-            getLogger().warning("Villager " + session.villagerId()
-                    + " became unavailable before its backpack edits could be written back;"
-                    + " its inventory still holds the items the editor removed.");
-        }
-    }
-
-    // Writes the opened backpack view back to the villager's real inventory on close. The view is
-    // a plain container, so edits are buffered until the player closes it.
     private final class BackpackCloseListener implements Listener {
 
         @EventHandler
         public void onClose(InventoryCloseEvent event) {
-            BackpackSession session = VillagersDelightPlugin.this.openBackpackViews.remove(event.getInventory());
-            if (session == null) {
-                return;
-            }
-            VillagersDelightPlugin.this.applyBackpackEdits(session, event.getInventory(), true);
+            BackpackSession session = openBackpackViews.remove(event.getInventory());
+            if (session != null) openBackpackVillagers.remove(session.villagerId());
         }
 
-        @EventHandler(ignoreCancelled = true)
+        @EventHandler(priority = EventPriority.HIGHEST)
         public void onClick(InventoryClickEvent event) {
-            if (!VillagersDelightPlugin.this.openBackpackViews.containsKey(event.getView().getTopInventory())) {
-                return;
-            }
             Inventory view = event.getView().getTopInventory();
-            if (event.getRawSlot() >= 0 && event.getRawSlot() < view.getSize()
-                    && event.getRawSlot() == view.getSize() - 1) {
+            BackpackSession session = openBackpackViews.get(view);
+            if (session == null) return;
+            if (!canAccessBackpack(session.player(), session.villager())) {
+                event.setCancelled(true);
+                closeUnavailableBackpack(session, view);
+            } else if (event.getRawSlot() == 8) {
                 event.setCancelled(true);
             }
         }
 
-        @EventHandler(ignoreCancelled = true)
+        @EventHandler(priority = EventPriority.HIGHEST)
         public void onDrag(InventoryDragEvent event) {
-            if (!VillagersDelightPlugin.this.openBackpackViews.containsKey(event.getView().getTopInventory())) {
-                return;
-            }
-            if (event.getRawSlots().contains(event.getView().getTopInventory().getSize() - 1)) {
+            Inventory view = event.getView().getTopInventory();
+            BackpackSession session = openBackpackViews.get(view);
+            if (session == null) return;
+            if (!canAccessBackpack(session.player(), session.villager())) {
+                event.setCancelled(true);
+                closeUnavailableBackpack(session, view);
+            } else if (event.getRawSlots().contains(8)) {
                 event.setCancelled(true);
             }
+        }
+
+        private void closeUnavailableBackpack(BackpackSession session, Inventory view) {
+            session.player().getScheduler().run(VillagersDelightPlugin.this, task -> {
+                if (session.player().getOpenInventory().getTopInventory() == view) {
+                    session.player().closeInventory();
+                }
+            }, null);
         }
     }
 
-    // Villagers pick items up passively in Mob.aiStep via wantsToPickUp (the villager_picks_up tag),
-    // never through the wanted-item sensor (villagers have no walk-to-wanted-item behavior). The tag includes
-    // CE seed/food base materials (e.g. nether brick, steak), which also admits vanilla items with the same
-    // material. Cancel items whose base material is injected but whose identity is not
-    // a configured seed/food. Bread, real seeds, and other naturally wanted vanilla items use non-injected
-    // base materials, so vanilla pickup and breeding remain intact.
+    // Restrict injected base materials to configured identities; preserve native pickups.
     private final class PickupFilterListener implements Listener {
 
         @EventHandler(ignoreCancelled = true)

@@ -44,7 +44,7 @@ public final class VillagersDelightConfig {
     }
 
     private static final BehaviorSettings DEFAULT_BEHAVIOR = new BehaviorSettings(
-            true, 0.05, true, 20, 32, 0.3, 40, 80, 20, 40, 200);
+            true, 0.05, true, 20, 10, 0.3, 40, 80, 20, 40, 200);
     private static final Map<String, Integer> DEFAULT_FD_FOOD_POINTS = Map.of(
             "farmersdelight:cabbage", 1,
             "farmersdelight:tomato", 1,

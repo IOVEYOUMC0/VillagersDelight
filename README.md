@@ -41,22 +41,32 @@ Install either the universal launcher jar or exactly one versioned jar matching 
 
 ## Compatibility verification
 
-Layer coverage, and how far each row has actually been verified. The `nms-1211` and `nms-26` rows
-record the 2026-09-17 audit; the `nms-1.21.5` row is the current 1.21.5 rebase, whose build and live
-smoke test are still pending:
+The current [live-backpack and vanilla-AI verification](docs/verification-villager-ai-2026-10-12.md)
+records exact build and runtime scope. The universal launcher's version selection is not a binary
+compatibility guarantee.
 
-| Minecraft | Layer | Evidence | Limit |
+| Minecraft | Layer | Current evidence | Limit |
 | --- | --- | --- | --- |
-| 1.21.5–1.21.10 | `nms-1.21.5` (compile anchor 1.21.5) | This layer is the implementation for the whole range. Its sources were checked against the 1.21.5 mappings: `VillagerData` is a record whose `profession()` returns `Holder<VillagerProfession>`, and `Villager`/`VillagerProfession` still live in `npc`. 1.21.6–1.21.10 select the same layer by version prefix; they have no per-version dev bundle, and 1.21.9/1.21.10 are refused at startup by the `npc.Villager` probe because the class moved to `npc.villager.Villager` | Not smoke-tested above 1.21.5, and the 1.21.5 build itself has not been run yet |
-| 1.21.11 | `nms-1211` | Builds against the matching Paper dev bundle; the universal jar carries its own `impl1211` copy of the shared behaviour classes (checked by comparing the compiled `BlockState.is` descriptor in each layer) | Full behavior regression not run in this audit |
-| 26.1.2 | `nms-26` | Builds against the matching Paper dev bundle | Full behavior regression not run in this audit |
-| 26.2 | `nms-26` | Existing Folia 26.2 startup log confirms `impl26` installation | Startup alone does not verify harvesting, sharing, consumption or inventory editing |
-| 26.3 | `nms-26` | Builds against dev bundle `26.3.build.41-alpha`, where `asCraftMirror` no longer exists. The `impl26` copy no longer reaches the mirror through CraftEngine's proxy: `VillagerItems.bukkitStack` resolves `CraftItemStack.asBukkitMirror` and falls back to the removed `asCraftMirror`, so a server that has neither fails with an `IllegalStateException` naming the version. The live 26.3 failure was CraftEngine 26.9.1 loading but its proxy binding the removed `asCraftMirror`, which threw `NoSuchMethodError` from `VillagerWantedItemSensor.isCollectable` | Six symbols changed on 26.3 — `CraftItemStack.asCraftMirror(ItemStack)`, `Villager.FOOD_POINTS`, `BonemealableBlock.isValidBonemealTarget` (now takes a `BonemealSource`), the `BlockPos(MutableBlockPos)` constructor, `ItemStack.getBukkitStack()` and `ComposterBlock.COMPOSTABLES`. The mirror is resolved at runtime here; no 26.3 server was started for this change, so harvesting, sharing, consumption and inventory editing are not re-observed on 26.3 |
+| 1.21.5 | `nms-1.21.5` | Matching Paper build passed | No live run in this check |
+| 1.21.6–1.21.8 | `nms-1.21.5` selected | Uses the 1.21.5 compile anchor | No per-patch build or live verification |
+| 1.21.9 / 1.21.10 | `nms-1.21.5` selected | Startup probe rejects the moved Villager class | Currently unsupported |
+| 1.21.11 | `nms-1211` | Matching Paper build passed, layer-specific shared classes bundled | No live run in this check |
+| 26.1.2 | `nms-26` | Matching Paper build and three native inventory/behavior tests passed | No new live run on this patch |
+| 26.2 | `nms-26` | Purpur 26.2-2622 passed 17 native menu, harvest/replant and pickup assertions; prior Folia startup passed | Client interaction, natural full-day schedules and live Folia cross-region tests pending |
+| 26.3 | `nms-26` | Earlier compile check passed; compatibility helpers handle known mirror/component changes | Not rebuilt against 26.3 or run on it in this check; compatible CE required |
 
-Version selection and `api-version` are not binary compatibility guarantees, but they are not the same
-thing as being unsupported either. The layers are `nms-1.21.5` for 1.21.5–1.21.10 (lower bound
-1.21.5), `nms-1211` for 1.21.11+, and `nms-26` for 26.x. What the 1.21.6–1.21.10 part of the range
-still lacks is a per-version build and a live run, not an implementation.
+The backpack's first eight slots are the villager's live inventory; closing does not write a snapshot
+back. Slot nine is locked, including Shift merges. Editing requires player and villager ownership on
+the current region. Minecraft manages the native menu and cursor without an additional sync timer.
+
+Vanilla planting sounds, profession guards, pickup checks/events, secondary POIs and the compost
+reserve are preserved. `villager-ai.compost.minimum-kept-per-item` defaults to **10**; existing
+explicit values remain unchanged. The separate custom food seed reserve defaults to 32.
+
+Only exact native behavior classes are replaced; unrelated activities and third-party subclasses
+remain in place. Removal restores native behavior classes and Gate weights, with fresh internal
+state. Use a complete stop/restart for upgrades: Folia runtime hot-disable cannot guarantee removal
+through a disabled plugin scheduler. Third-party AI combinations still require their own checks.
 
 ## Build
 
@@ -70,10 +80,9 @@ so they cannot share one build). Run `./gradlew shadowJar` inside the module you
   The bundle is overridable for compatibility checks against another release without editing the build:
   `./gradlew build -PdevBundle=26.3.build.41-alpha`.
 
-CraftEngine is compiled against the official Maven 26.9.1 artifacts and
-`../FarmersDelight/libs`; earlier CraftEngine artifacts have incompatible event APIs. The server-side
-CraftEngine releases verified for this build are 26.8.2, 26.9 and 26.9.1 (every CraftEngine class and member
-the jar references resolves in all three); pass `-PceVersion=<version>` to compile against another release.
+CraftEngine is compiled against the official Maven 26.9.1 artifacts. Current CE references resolve
+in 26.8.2, 26.9, 26.9.1, 26.9.2 and all three local 26.10 snapshots; this does not verify Minecraft NMS
+compatibility. Pass `-PceVersion=<version>` to change the compile dependency.
 
 Versioned output: `nms-*/build/libs/villagersdelight-0.1.1-<mc>.jar`.
 

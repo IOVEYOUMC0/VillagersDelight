@@ -1,6 +1,9 @@
 package com.huidu.villagersdelight.impl215;
 
 import com.huidu.villagersdelight.impl215.common.VillagerAiSettings;
+import com.huidu.villagersdelight.impl215.common.VillagerItems;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import com.huidu.villagersdelight.impl215.common.VillagerBlockAccess;
 import com.huidu.villagersdelight.core.CeBlockAccess;
 import com.huidu.villagersdelight.core.CeItemAccess;
@@ -119,6 +122,7 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, Villager villager) {
+        if (!VillagerItems.isFarmer(villager)) return false;
         if (!level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) {
             return false;
         }
@@ -505,6 +509,8 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
                     }
                     level.setBlockAndUpdate(pos, toPlace);
                     level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(villager, toPlace));
+                    level.playSound(null, pos.getX(), pos.getY(), pos.getZ(),
+                            SoundEvents.CROP_PLANTED, SoundSource.BLOCKS, 1.0F, 1.0F);
                     stack.shrink(1);
                     return true;
                 }

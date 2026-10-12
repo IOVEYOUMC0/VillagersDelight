@@ -11,6 +11,9 @@ import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.item.ItemStack;
 import org.bukkit.craftbukkit.event.CraftEventFactory;
 import org.bukkit.event.entity.EntityRemoveEvent;
+import org.bukkit.Bukkit;
+import net.minecraft.world.level.gamerules.GameRules;
+import org.bukkit.entity.Item;
 
 import java.util.Map;
 
@@ -29,11 +32,14 @@ public final class VillagerCollectWantedItem extends Behavior<Villager> {
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, Villager villager) {
-        if (villager.getAge() != 0 || villager.isSleeping()) {
+        if (villager.getAge() != 0 || villager.isSleeping() || !villager.canPickUpLoot()
+                || !level.getGameRules().get(GameRules.MOB_GRIEFING)) {
             return false;
         }
         ItemEntity item = villager.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_WANTED_ITEM).orElse(null);
-        if (item == null || !item.isAlive() || item.hasPickUpDelay() || item.getOwner() != null) {
+        if (item == null || !Bukkit.isOwnedByCurrentRegion(item.getBukkitEntity())
+                || !item.isAlive() || item.hasPickUpDelay()
+                || !((Item) item.getBukkitEntity()).canMobPickup()) {
             return false;
         }
         return isCollectable(item) && villager.hasLineOfSight(item) && item.closerThan(villager, PICKUP_REACH);
@@ -41,8 +47,9 @@ public final class VillagerCollectWantedItem extends Behavior<Villager> {
 
     @Override
     protected void start(ServerLevel level, Villager villager, long gameTime) {
+        if (!checkExtraStartConditions(level, villager)) return;
         ItemEntity item = villager.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_WANTED_ITEM).orElse(null);
-        if (item == null || !item.isAlive() || item.hasPickUpDelay()) {
+        if (item == null) {
             return;
         }
         ItemStack stack = item.getItem();
@@ -52,7 +59,8 @@ public final class VillagerCollectWantedItem extends Behavior<Villager> {
         }
         // Mirror InventoryCarrier.pickUpItem but drop the wantsToPickUp gate so CE custom items,
         // whose base material is not tagged, can be collected. The event still fires cancellation.
-        if (CraftEventFactory.callEntityPickupItemEvent(villager, item, stack.getCount(), false).isCancelled()) {
+        ItemStack remaining = new SimpleContainer(inventory).addItem(stack);
+        if (CraftEventFactory.callEntityPickupItemEvent(villager, item, remaining.getCount(), false).isCancelled()) {
             return;
         }
         villager.onItemPickup(item);

@@ -63,6 +63,18 @@ val checkCraftMirror = tasks.register<JavaExec>("checkCraftMirror") {
     enableAssertions = true
 }
 
+// The NMS layers withdraw exactly the behaviour classes and sensors they injected, and they record them while
+// they inject: the shared behaviour sources are relocated into a layer-specific package, so a withdrawal that
+// rebuilds the class names misses most of them. The check reads the three layer sources, so it does not depend
+// on any one layer's classpath.
+val checkBehaviorWithdraw = tasks.register<JavaExec>("checkBehaviorWithdraw") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.huidu.villagersdelight.core.VillagerBehaviorWithdrawCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    enableAssertions = true
+}
+
 tasks.check {
-    dependsOn(checkFoodRules, checkCraftMirror)
+    dependsOn(checkFoodRules, checkCraftMirror, checkBehaviorWithdraw)
 }

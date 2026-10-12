@@ -1,6 +1,13 @@
 package com.huidu.villagersdelight.core;
 
+import net.kyori.adventure.text.Component;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.Villager;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 // Contract between the version-agnostic core and the NMS layer shipped in the same jar.
 // Implemented reflectively by com.huidu.villagersdelight.nms.NmsVillagerAi.
@@ -9,6 +16,9 @@ public interface VillagerAiInjector {
     void install();
 
     void shutdown();
+
+    Inventory openBackpack(Player player, Villager villager, Component title,
+                           ItemStack padding, BooleanSupplier accessible);
 
     // Custom food points and farmer seed reserves; Minecraft's static food table is untouched.
     void configureFoodItems(VillagerFoodRules rules);

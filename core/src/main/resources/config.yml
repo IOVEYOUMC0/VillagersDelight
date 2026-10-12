@@ -140,7 +140,7 @@ villager-ai:
       farmersdelight:rice_panicle: 0
   compost:
     max-items-per-work: 20
-    minimum-kept-per-item: 32
+    minimum-kept-per-item: 10
     default-chance: 0.3
   bonemeal:
     retry-delay-ticks: 40
