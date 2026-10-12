@@ -69,20 +69,22 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
     }
 
     private final List<SeedSlot> seedSlots = new ArrayList<>();
-    // Signature of the inventory the decoded slots came from. The scan that calls decodeSeedSlots runs on every
-    // random 60-120 tick deadline and on every tick while no target is valid, so re-decoding an unchanged
-    // inventory is wasted work; the decode only reads which items are held.
+    // Reuse decoded seeds until inventory identity or crop rules change.
     private boolean seedSlotsDecoded;
     private long seedSlotsSignature;
+    private CropRegistry seedSlotsRegistry;
 
     private void decodeSeedSlots(Villager villager) {
         SimpleContainer inventory = villager.getInventory();
+        CropRegistry registry = CropRegistry.instance();
         long signature = seedSlotsSignature(inventory);
-        if (this.seedSlotsDecoded && signature == this.seedSlotsSignature) {
+        if (this.seedSlotsDecoded && registry == this.seedSlotsRegistry
+                && signature == this.seedSlotsSignature) {
             return;
         }
         this.seedSlotsDecoded = true;
         this.seedSlotsSignature = signature;
+        this.seedSlotsRegistry = registry;
         this.seedSlots.clear();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
@@ -99,8 +101,6 @@ public final class VillagerFarmBehavior extends HarvestFarmland {
                 this.seedSlots.add(new SeedSlot(crop, customCropsId, vanillaSeed));
             }
         }
-        // Kept behind the debug flag: it fires only when the signature changed, so it doubles as a cache
-        // invalidation trace for anyone diagnosing why a villager does not plant a seed it just picked up.
         VillagersDelightPlugin.debug("farm: decoded " + this.seedSlots.size() + " seed slot(s)");
     }
 

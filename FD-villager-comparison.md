@@ -1,5 +1,7 @@
 # VD 与 FD 的村民行为对照
 
+最新缓存/催熟全链路修复与实机范围见[代码复核验证](docs/verification-code-paths-2026-10-12.md)。
+
 对照 FD 1.21 的村民相关代码，以及原版 `Villager`、`TradeWithVillager`、`WorkAtComposter`、`ComposterBlock` 的调用链。满背包堆肥实机范围见[专项验证](docs/verification-compost-2026-10-12.md)；原版农民不会因背包满而把全部蔬菜自动堆掉。
 
 | 项目 | FD 原模组 | VD 当前行为 |

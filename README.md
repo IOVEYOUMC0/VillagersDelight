@@ -41,6 +41,9 @@ Install either the universal launcher jar or exactly one versioned jar matching 
 
 ## Compatibility verification
 
+The [code-path verification](docs/verification-code-paths-2026-10-12.md) also covers crop-rule
+reloads with unchanged inventory and one bonemeal attempt per work cycle.
+
 The current [live-backpack and vanilla-AI verification](docs/verification-villager-ai-2026-10-12.md)
 records exact build and runtime scope. The universal launcher's version selection is not a binary
 compatibility guarantee.

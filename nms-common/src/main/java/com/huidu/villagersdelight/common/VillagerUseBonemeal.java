@@ -106,12 +106,13 @@ public final class VillagerUseBonemeal extends Behavior<Villager> {
             SimpleContainer inventory = body.getInventory();
             for (int i = 0; i < inventory.getContainerSize(); i++) {
                 ItemStack boneMeal = inventory.getItem(i);
-                if (boneMeal.is(Items.BONE_MEAL)
-                        && BoneMealItem.growCrop(boneMeal, level, target)) {
-                    level.levelEvent(1505, target, 15);
-                    this.cropPos = this.pickNextTarget(level, body);
-                    this.setCurrentCropAsTarget(body);
-                    this.nextWorkCycleTime = timestamp + VillagerAiSettings.BONEMEAL_RETRY_DELAY;
+                if (boneMeal.is(Items.BONE_MEAL)) {
+                    if (BoneMealItem.growCrop(boneMeal, level, target)) {
+                        level.levelEvent(1505, target, 15);
+                        this.cropPos = this.pickNextTarget(level, body);
+                        this.setCurrentCropAsTarget(body);
+                        this.nextWorkCycleTime = timestamp + VillagerAiSettings.BONEMEAL_RETRY_DELAY;
+                    }
                     break;
                 }
             }
