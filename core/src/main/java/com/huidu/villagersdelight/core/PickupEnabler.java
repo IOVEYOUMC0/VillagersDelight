@@ -5,8 +5,6 @@ import net.momirealms.craftengine.bukkit.item.BukkitItemDefinition;
 import net.momirealms.craftengine.core.util.Key;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.Tag;
 import org.bukkit.World;
 
 import java.io.File;
@@ -22,7 +20,7 @@ import java.util.Set;
 // Makes villager farmers pick up the configured crop seeds. Vanilla villagers only pick up items
 // whose underlying material is in the villager_picks_up tag (or in the profession's requested
 // items). Since 26.x removed runtime tag mutation, this generates a small data pack that appends
-// the missing materials to the villager_picks_up tag and reloads data packs. CE seed items can
+// the missing materials to the villager_picks_up tag for the next server start. CE seed items can
 // therefore keep a vanilla base material that players cannot obtain or place (e.g. knowledge book).
 public final class PickupEnabler {
 
@@ -114,21 +112,7 @@ public final class PickupEnabler {
         }
         plugin.getLogger().info("Pickup: wrote villager_picks_up tag " + desired + " (data pack)");
         dataPackWritten = true;
-        if (isRegionizedServer()) {
-            plugin.getLogger().warning("Pickup: data pack written; runtime data reload is disabled on regionized servers. Restart the server to apply it");
-            return;
-        }
-        Bukkit.getGlobalRegionScheduler().runDelayed(plugin, task -> {
-            try {
-                Bukkit.reloadData();
-            } catch (UnsupportedOperationException e) {
-                plugin.getLogger().warning("Pickup: this server does not support runtime data reload; restart it to apply the data pack");
-                return;
-            }
-            // Reloading resources is async; verify a moment later so the log shows whether the
-            // injected tag actually became visible to the vanilla tag registry.
-            Bukkit.getGlobalRegionScheduler().runDelayed(plugin, verifyTask -> verifyInjectedTags(plugin, desired), 100L);
-        }, 40L);
+        plugin.getLogger().warning("Pickup: data pack written; restart the server to apply the pickup tag");
     }
 
     private static boolean dataPackMatches(File root, Set<Material> materials) {
@@ -151,7 +135,7 @@ public final class PickupEnabler {
     }
 
     // Serialized with a sorted value list so the same desired set always produces the same bytes,
-    // letting dataPackMatches skip the write (and the expensive reloadData) when nothing changed
+    // letting dataPackMatches skip the write when nothing changed
     // regardless of the set's iteration order.
     private static String tagContent(Set<Material> materials) {
         List<String> keys = new ArrayList<>();
@@ -162,99 +146,17 @@ public final class PickupEnabler {
         return "{\"replace\":false,\"values\":[" + String.join(",", keys) + "]}\n";
     }
 
-    private static void verifyInjectedTags(VillagersDelightPlugin plugin, Set<Material> materials) {
-        boolean allActive = true;
-        for (Material material : materials) {
-            if (!isVillagerPickable(material)) {
-                allActive = false;
-                plugin.getLogger().warning("Pickup: " + material + " still not in villager_picks_up tag after reloadData; restart the server (or run /reload) to apply the data pack");
-            }
-        }
-        if (allActive) {
-            plugin.getLogger().info("Pickup: tag active, villagers can now pick up " + materials);
-        }
-    }
-
-    // The data pack format is version specific: a single pack_format up to 1.21.8, a min_format and
-    // max_format pair from 1.21.9 onward. A pack whose declared format falls outside the range the
-    // server accepts is skipped without an error, and the tag never reaches the registry -- the only
-    // symptom would be the warning in verifyInjectedTags, which blames timing for a format problem.
-    // VillagersDelight carries no FarmersDelight dependency on purpose, so this repeats the probe in
-    // com.huidu.farmersdelight.api.util.DatapackSupport rather than calling it.
     private static String packMetadata() {
-        PackFormat format = serverDataPackFormat();
-        if (format == null) {
-            format = fallbackPackFormat();
-        }
-        String line = format.range()
-                ? "\"min_format\":" + format.major() + ",\"max_format\":" + MAX_RANGE_FORMAT
-                : "\"pack_format\":" + format.major();
-        return "{\"pack\":{\"description\":\"VillagersDelight villager seed pickup\"," + line + "}}\n";
+        return packMetadata(Bukkit.getBukkitVersion());
     }
 
-    private record PackFormat(int major, boolean range) {
-    }
-
-    private static final int MAX_RANGE_FORMAT = 150;
-
-    // 1.21.5 exposes getPackVersion(PackType) returning an int; 26.x renamed it to packVersion(PackType)
-    // and returns a PackFormat record. Both are reached reflectively so one jar covers the whole range.
-    private static PackFormat serverDataPackFormat() {
-        try {
-            Class<?> shared = Class.forName("net.minecraft.SharedConstants");
-            Object worldVersion = null;
-            for (String name : new String[]{"getCurrentVersion", "currentVersion"}) {
-                try {
-                    worldVersion = shared.getMethod(name).invoke(null);
-                    break;
-                } catch (NoSuchMethodException ignored) {
-                    // try the other spelling
-                }
-            }
-            if (worldVersion == null) {
-                return null;
-            }
-            Class<?> packTypeClass = Class.forName("net.minecraft.server.packs.PackType");
-            Object serverData = null;
-            for (Object constant : packTypeClass.getEnumConstants()) {
-                if ("SERVER_DATA".equals(((Enum<?>) constant).name())) {
-                    serverData = constant;
-                    break;
-                }
-            }
-            if (serverData == null) {
-                return null;
-            }
-            for (String name : new String[]{"packVersion", "getPackVersion"}) {
-                try {
-                    Object result = worldVersion.getClass()
-                            .getMethod(name, packTypeClass).invoke(worldVersion, serverData);
-                    if (result instanceof Integer value) {
-                        return new PackFormat(value, false);
-                    }
-                    Object major = result.getClass().getMethod("major").invoke(result);
-                    return new PackFormat(((Number) major).intValue(), true);
-                } catch (NoSuchMethodException ignored) {
-                    // try the other spelling
-                }
-            }
-        } catch (Throwable ignored) {
-            // Any linkage or access failure falls back to the version table below.
-        }
-        return null;
-    }
-
-    // Data pack format history: 1.21.5=71, 1.21.6/7/8=80; 1.21.9 and every 26.x release use
-    // the min_format/max_format range form (88 is the 1.21.9 data pack major format).
-    private static PackFormat fallbackPackFormat() {
-        String version = Bukkit.getBukkitVersion();
-        if (version.contains("1.21.5")) {
-            return new PackFormat(71, false);
-        }
-        if (version.contains("1.21.6") || version.contains("1.21.7") || version.contains("1.21.8")) {
-            return new PackFormat(80, false);
-        }
-        return new PackFormat(88, true);
+    static String packMetadata(String version) {
+        String format = version.startsWith("1.21.5-") || version.equals("1.21.5")
+                ? "\"pack_format\":71"
+                : version.startsWith("1.21.6") ? "\"pack_format\":80"
+                : version.startsWith("1.21.7") || version.startsWith("1.21.8") ? "\"pack_format\":81"
+                : "\"min_format\":88,\"max_format\":150";
+        return "{\"pack\":{\"description\":\"VillagersDelight villager seed pickup\"," + format + "}}\n";
     }
 
     // Resolves the world folder that holds level.dat. Same heuristic as FarmersDelight's
@@ -278,17 +180,6 @@ public final class PickupEnabler {
         return Material.matchMaterial(seedId.toString());
     }
 
-    private static boolean isVillagerPickable(Material material) {
-        Tag<Material> picksUp = tag("villager_picks_up");
-        Tag<Material> plantable = tag("villager_plantable_seeds");
-        return (picksUp != null && picksUp.isTagged(material))
-                || (plantable != null && plantable.isTagged(material));
-    }
-
-    private static Tag<Material> tag(String key) {
-        return Bukkit.getTag(Tag.REGISTRY_ITEMS, NamespacedKey.minecraft(key), Material.class);
-    }
-
     private static boolean writeDataPack(File root, Set<Material> materials) {
         try {
             Files.createDirectories(root.toPath());
@@ -306,22 +197,4 @@ public final class PickupEnabler {
         }
     }
 
-    private static boolean isRegionizedServer() {
-        String className = "io.papermc.paper.threadedregions.RegionizedServer";
-        ClassLoader[] loaders = {
-                PickupEnabler.class.getClassLoader(),
-                Thread.currentThread().getContextClassLoader(),
-                Bukkit.getServer() == null ? null : Bukkit.getServer().getClass().getClassLoader(),
-                ClassLoader.getSystemClassLoader()
-        };
-        for (ClassLoader loader : loaders) {
-            try {
-                Class.forName(className, false, loader);
-                return true;
-            } catch (ClassNotFoundException | LinkageError ignored) {
-                // Try the next loader; plugin and server classes may use different class loaders.
-            }
-        }
-        return false;
-    }
 }

@@ -75,6 +75,14 @@ val checkBehaviorWithdraw = tasks.register<JavaExec>("checkBehaviorWithdraw") {
     enableAssertions = true
 }
 
+val checkServerCompatibility = tasks.register<JavaExec>("checkServerCompatibility") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.huidu.villagersdelight.core.ServerCompatibilityCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    enableAssertions = true
+}
+
 tasks.check {
-    dependsOn(checkFoodRules, checkCraftMirror, checkBehaviorWithdraw)
+    dependsOn(checkFoodRules, checkCraftMirror, checkBehaviorWithdraw, checkServerCompatibility)
 }

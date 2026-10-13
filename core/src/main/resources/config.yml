@@ -94,7 +94,7 @@ harvest-drops:
 #         繁殖食物点数见 villager-ai.food.points，值为 0 的物品只拾取、不食用。
 #         留空则不进行判定。
 # use-datapack-tag: true 沿用旧路径，把 CE 物品的基底材质注入 villager_picks_up data pack
-#                    （需要数据包/reloadData，同基材的原版同名物品也会被捡）；
+#                    （需要完整重启加载标签，同基材的原版同名物品也会被捡）；
 #                    false 改用按 CE 物品 id 直接拾取，无需数据包且不误放原版同名物品。
 pickup:
   enabled: true

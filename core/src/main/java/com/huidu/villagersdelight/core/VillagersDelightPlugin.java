@@ -133,7 +133,8 @@ public final class VillagersDelightPlugin extends JavaPlugin {
 
         boolean matchesServer(String minecraftVersion) {
             return minecraftVersion != null && serverVersionPrefixes.stream()
-                    .anyMatch(minecraftVersion::startsWith);
+                    .anyMatch(version -> version.endsWith(".")
+                            ? minecraftVersion.startsWith(version) : minecraftVersion.equals(version));
         }
 
         String firstMissingServerClass(ClassLoader loader) {
@@ -160,7 +161,7 @@ public final class VillagersDelightPlugin extends JavaPlugin {
                     List.of("net.minecraft.world.level.block.FarmBlock",
                             "net.minecraft.world.entity.npc.villager.Villager")),
             new NmsCandidate("com.huidu.villagersdelight.impl215.NmsVillagerAi",
-                    List.of("1.21.5", "1.21.6", "1.21.7", "1.21.8", "1.21.9", "1.21.10"),
+                    List.of("1.21.5", "1.21.6", "1.21.7", "1.21.8"),
                     List.of("net.minecraft.world.level.block.FarmBlock",
                             "net.minecraft.world.entity.npc.Villager")));
 

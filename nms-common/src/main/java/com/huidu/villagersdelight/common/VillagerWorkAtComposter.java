@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.ai.behavior.WorkAtComposter;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -193,13 +194,9 @@ public final class VillagerWorkAtComposter extends WorkAtComposter {
         }
         ItemStack leftOver = inventory.addItem(new ItemStack(Items.BREAD, breadToMake));
         if (!leftOver.isEmpty()) {
-            boolean forceDrops = body.forceDrops;
-            body.forceDrops = true;
-            try {
-                body.spawnAtLocation(level, leftOver, 0.5F);
-            } finally {
-                body.forceDrops = forceDrops;
-            }
+            ItemEntity drop = new ItemEntity(level, body.getX(), body.getY() + 0.5D, body.getZ(), leftOver.copy());
+            drop.setDefaultPickUpDelay();
+            body.spawnAtLocation(level, drop);
         }
     }
 

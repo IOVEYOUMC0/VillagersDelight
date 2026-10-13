@@ -1,7 +1,7 @@
 <h1 align="center">VillagersDelight</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Minecraft-1.21.5%20%E2%80%93%2026.x-3fb950" alt="Minecraft 1.21.5 – 26.x">
+  <img src="https://img.shields.io/badge/Minecraft-see%20compatibility%20table-3fb950" alt="Minecraft: see compatibility table">
   <img src="https://img.shields.io/badge/Java-21%20%2F%2025-orange" alt="Java 21 / 25">
   <img src="https://img.shields.io/badge/Paper%20%2F%20Purpur-supported-blueviolet" alt="Paper / Purpur">
   <img src="https://img.shields.io/badge/CraftEngine-26.9.1-5865F2" alt="CraftEngine 26.9.1">
@@ -27,7 +27,7 @@ bread, carrots, potatoes and beetroot still use Minecraft's own consumption logi
 ## Modules
 
 - `core/` — version-agnostic: crop index over CraftEngine, CE block access, config, plugin lifecycle.
-- `nms-1.21.5/` — paperweight build for MC 1.21.5, the lower bound of the 1.21.5–1.21.10 layer; produces the final plugin jar (bundles core).
+- `nms-1.21.5/` — paperweight build for MC 1.21.5, the lower bound of the 1.21.5–1.21.8 layer; produces the final plugin jar (bundles core).
 - `nms-1211/` — paperweight build for MC 1.21.11, produces the final plugin jar (bundles core).
 - `nms-26/` — paperweight build for MC 26.x (26.1.2), produces the final plugin jar.
 - `launcher/` — merges core and all versioned implementations into one universal plugin jar.
@@ -44,6 +44,8 @@ Install either the universal launcher jar or exactly one versioned jar matching 
 The [code-path verification](docs/verification-code-paths-2026-10-12.md) also covers crop-rule
 reloads with unchanged inventory and one bonemeal attempt per work cycle.
 
+The version selector excludes 1.21.9/1.21.10: their villager package changed and no matching layer is bundled. Legacy `pickup.use-datapack-tag` mode writes the pickup pack for the next full restart; it never reloads server data automatically. Metadata uses official release formats (1.21.5: 71, 1.21.6: 80, 1.21.7/8: 81). Custom-ID pickup is still available through `pickup.use-datapack-tag: false`; the default remains tag mode.
+
 The current [live-backpack and vanilla-AI verification](docs/verification-villager-ai-2026-10-12.md)
 records exact build and runtime scope. The universal launcher's version selection is not a binary
 compatibility guarantee.
@@ -52,7 +54,7 @@ compatibility guarantee.
 | --- | --- | --- | --- |
 | 1.21.5 | `nms-1.21.5` | Matching Paper build passed | No live run in this check |
 | 1.21.6–1.21.8 | `nms-1.21.5` selected | Uses the 1.21.5 compile anchor | No per-patch build or live verification |
-| 1.21.9 / 1.21.10 | `nms-1.21.5` selected | Startup probe rejects the moved Villager class | Currently unsupported |
+| 1.21.9 / 1.21.10 | No layer selected | Explicitly excluded; their Villager package differs from the 1.21.5 layer | Currently unsupported |
 | 1.21.11 | `nms-1211` | Matching Paper build passed, layer-specific shared classes bundled | No live run in this check |
 | 26.1.2 | `nms-26` | Matching Paper build and three native inventory/behavior tests passed | No new live run on this patch |
 | 26.2 | `nms-26` | Purpur 26.2-2622 passed 17 native menu/farming/pickup and 28 separate compost assertions; prior Folia startup passed | Client interaction, natural full-day schedules and live Folia cross-region tests pending |
