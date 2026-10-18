@@ -16,9 +16,9 @@ import java.util.Set;
  *
  * VillagersDelight injects behaviours and sensors straight into live villager brains; a hot unload cannot
  * withdraw them, and a re-enable installs a second copy while the first keeps running against a dead
- * classloader. The JVM-property guard in {@link VillagersDelightPlugin#onEnable()} only catches the re-enable
- * (after the damage); this cancels the destructive command itself. Same list of plugin managers as the rest of
- * the family, kept local so VillagersDelight stays independent of FarmersDelight's API.
+ * classloader. The JVM-property guard in VillagersDelightPlugin.onEnable only catches the re-enable (after the
+ * damage); this cancels the destructive command itself. The plugin-manager names are kept local so this plugin
+ * has no compile dependency on another plugin.
  */
 public final class PluginManagerGuard implements Listener {
 

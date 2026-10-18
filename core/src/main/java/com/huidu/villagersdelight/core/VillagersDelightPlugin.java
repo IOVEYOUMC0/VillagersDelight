@@ -4,6 +4,7 @@ import com.mojang.brigadier.Command;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.tree.LiteralCommandNode;
+import net.momirealms.craftengine.bukkit.api.CraftEngineBlocks;
 import net.momirealms.craftengine.bukkit.api.CraftEngineItems;
 import net.momirealms.craftengine.bukkit.api.event.CraftEngineReloadEvent;
 import net.momirealms.craftengine.core.util.Key;
@@ -453,6 +454,14 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         language.reload();
         CropRegistry.reload(this);
         CropRegistry registry = CropRegistry.instance();
+        // CraftEngine resolves block definitions lazily and silently skips ids it has not loaded yet. A
+        // registry built before its content arrived stays crops=0 for the whole session otherwise, so treat
+        // "configured crops but nothing resolved and CE blocks still empty" as not ready and retry.
+        if (!this.config.crops().isEmpty() && (registry == null || registry.cropCount() == 0)
+                && CraftEngineBlocks.loadedBlocks().isEmpty()) {
+            this.configNotReady = true;
+            return false;
+        }
         // The data pack only widens what villagers MAY pick up; the wanted-item sensor that narrows it
         // back down to the configured seeds lives in the NMS layer. Writing the pack without that layer
         // makes every villager on the server start hoarding the raw base materials of CE seed items.
@@ -492,10 +501,12 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     }
 
     private void scheduleConfigRetryIfNeeded() {
-        if (!this.configNotReady || !isEnabled() || this.configRetryAttempts >= 20) {
+        // 40 × 10 ticks ≈ 20s: CraftEngine's async content load takes about 12s on a slow start, and a
+        // shorter window leaves the session at 0 crops until the operator runs /vd reload.
+        if (!this.configNotReady || !isEnabled() || this.configRetryAttempts >= 40) {
             if (this.configNotReady) {
                 getLogger().warning("CraftEngine custom items are still unavailable after startup retries; "
-                        + "VillagersDelight kept the previous configuration.");
+                        + "VillagersDelight kept the previous configuration. Run /vd reload once CE has loaded.");
             }
             return;
         }
