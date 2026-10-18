@@ -187,6 +187,9 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         language.init();
         getServer().getPluginManager().registerEvents(new BackpackCloseListener(), this);
         getServer().getPluginManager().registerEvents(new PickupFilterListener(), this);
+        // Refuse a live plugin-manager unload/reload before it strands the brain injection; the JVM-property
+        // guard below only catches the re-enable, which is already too late for the injected behaviours.
+        getServer().getPluginManager().registerEvents(new PluginManagerGuard(getName()), this);
         registerCommands();
         getServer().getPluginManager().registerEvents(new ReloadListener(), this);
         if (!reloadFromConfig() && !configNotReady) {
