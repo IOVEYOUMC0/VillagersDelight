@@ -34,7 +34,6 @@ import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.EnumSet;
 import java.util.List;
