@@ -160,8 +160,11 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     }
 
     // Removes every behaviour this injector installed from every villager it touched. One failing
-    // villager must not abort the rest.
+    // villager must not abort the rest. Villagers this thread owns are restored here; villagers owned by
+    // another region can only be reached through the scheduler, which is already refusing work once the plugin
+    // is disabled, so those are counted instead of queued into a task that would never run.
     private void withdrawAllBehaviors() {
+        int unreachable = 0;
         for (org.bukkit.entity.Villager villager : List.copyOf(injectedVillagers.values())) {
             try {
                 if (!villager.isValid()) {
@@ -169,15 +172,20 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
                 }
                 if (Bukkit.isOwnedByCurrentRegion(villager)) {
                     removeInjectedFrom(villager);
-                } else {
-                    // Entities are only readable on their owning region thread, so a villager owned by
-                    // another region is handled by its own scheduler instead of from here.
+                } else if (this.plugin.isEnabled()) {
                     villager.getScheduler().run(this.plugin, task -> removeInjectedFrom(villager), null);
+                } else {
+                    unreachable++;
                 }
             } catch (RuntimeException e) {
                 warnFailureOnce("withdraw:" + villager.getUniqueId(), "shutdown: behavior withdrawal for "
                         + villager.getUniqueId() + " failed: " + e.getMessage());
             }
+        }
+        if (unreachable > 0) {
+            warnFailureOnce("withdraw:foreign-region", "Disabled with " + unreachable
+                    + " villager(s) owned by other regions: their injected behaviours stay until a restart,"
+                    + " which is why a runtime disable is not a hot reload.");
         }
     }
 
