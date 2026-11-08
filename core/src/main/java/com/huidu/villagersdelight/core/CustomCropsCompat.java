@@ -22,6 +22,9 @@ public final class CustomCropsCompat {
     private static final String BREAK_REASON_CLASS = "net.momirealms.customcrops.api.core.block.BreakReason";
 
     private static volatile Access access;
+    /** Crop config identity -> "all stages are blocks"; dropped when the reflected access is rebuilt. */
+    private static final java.util.Map<Object, Boolean> BLOCK_STAGE_CACHE =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
     private static volatile boolean unavailable;
 
     private CustomCropsCompat() {
@@ -179,15 +182,29 @@ public final class CustomCropsCompat {
         return form != null && "BLOCK".equalsIgnoreCase(String.valueOf(form));
     }
 
+    /**
+     * Per-crop-config answer to "does every stage render as a block", cached by identity.
+     *
+     * <p>The scan is (maxPoints + 1) * 2 reflective calls, and {@link #stateAt} runs it for every candidate
+     * position on every work tick, so a farmer cost thousands of reflective invocations per second. A crop config
+     * object is created once per crop type by CustomCrops and its stages do not change while the server runs.
+     */
     private static boolean hasOnlyBlockStages(Access access, Object config) throws ReflectiveOperationException {
+        Boolean cached = BLOCK_STAGE_CACHE.get(config);
+        if (cached != null) {
+            return cached;
+        }
+        boolean result = true;
         int maxPoints = ((Number) access.maxPoints.invoke(config)).intValue();
         for (int point = 0; point <= maxPoints; point++) {
             Object stage = access.stageForPoint.invoke(config, point);
             if (stage == null || !isBlockStage(access.stageForm.invoke(stage))) {
-                return false;
+                result = false;
+                break;
             }
         }
-        return true;
+        BLOCK_STAGE_CACHE.put(config, result);
+        return result;
     }
 
     private static Object lookup(Object registry, String key) throws ReflectiveOperationException {
@@ -216,6 +233,9 @@ public final class CustomCropsCompat {
         }
         try {
             Access created = new Access(plugin.getClass().getClassLoader());
+            // A rebuilt access means CustomCrops was reloaded: its crop config objects are new identities, so the
+            // stage-shape answers cached against the previous ones are meaningless.
+            BLOCK_STAGE_CACHE.clear();
             access = created;
             return created;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
