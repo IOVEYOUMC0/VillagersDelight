@@ -6,3 +6,6 @@ bin/
 .idea/
 .vscode/
 out/
+
+# Local build/deploy transcripts
+.deploy-build*.log
