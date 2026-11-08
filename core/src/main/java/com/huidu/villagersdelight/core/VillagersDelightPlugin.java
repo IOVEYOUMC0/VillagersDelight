@@ -156,8 +156,11 @@ public final class VillagersDelightPlugin extends JavaPlugin {
                     List.of("26."),
                     List.of("net.minecraft.world.level.block.FarmlandBlock",
                             "net.minecraft.world.entity.npc.villager.Villager")),
+            // 1.21.9 and 1.21.10 moved the villager to npc.villager.Villager and still ship FarmBlock, exactly like
+            // 1.21.11, so they run the same layer. Without them the lookup matched no layer at all and villagers
+            // silently fell back to vanilla farming.
             new NmsCandidate("com.huidu.villagersdelight.impl1211.NmsVillagerAi",
-                    List.of("1.21.11"),
+                    List.of("1.21.9", "1.21.10", "1.21.11"),
                     List.of("net.minecraft.world.level.block.FarmBlock",
                             "net.minecraft.world.entity.npc.villager.Villager")),
             new NmsCandidate("com.huidu.villagersdelight.impl215.NmsVillagerAi",

@@ -7,10 +7,11 @@ public final class ServerCompatibilityCheck {
         var field = VillagersDelightPlugin.class.getDeclaredField("NMS_CANDIDATES");
         field.setAccessible(true);
         var candidates = (List<?>) field.get(null);
-        for (String version : List.of("1.21.5", "1.21.6", "1.21.7", "1.21.8", "1.21.11", "26.1.2", "26.2")) {
+        for (String version : List.of("1.21.5", "1.21.6", "1.21.7", "1.21.8", "1.21.9", "1.21.10", "1.21.11",
+                "26.1.2", "26.2")) {
             assert matchingLayers(candidates, version) == 1 : version;
         }
-        for (String version : List.of("1.21.4", "1.21.9", "1.21.10", "1.21.50", "1.21.110", "27.1", "")) {
+        for (String version : List.of("1.21.4", "1.21.50", "1.21.110", "27.1", "")) {
             assert matchingLayers(candidates, version) == 0 : version;
         }
         assert matchingLayers(candidates, null) == 0;
