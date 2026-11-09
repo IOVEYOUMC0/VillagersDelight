@@ -103,7 +103,11 @@ public final class CustomCropsCompat {
                 return null;
             }
             return String.valueOf(a.configId.invoke(config));
-        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+        } catch (LinkageError replaced) {
+            // CustomCrops was reloaded with a new class loader: every reflected handle points at the old one.
+            invalidate();
+            return null;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
             return null;
         }
     }
@@ -209,6 +213,16 @@ public final class CustomCropsCompat {
 
     private static Object lookup(Object registry, String key) throws ReflectiveOperationException {
         return registry == null || key == null ? null : registry.getClass().getMethod("get", Object.class).invoke(registry, key);
+    }
+
+    /**
+     * Drops the reflected bridge and its cached answers. Called when the bridge classes were replaced
+     * (CustomCrops reloaded with a new class loader) and on plugin disable; the next call rebuilds it.
+     */
+    public static void invalidate() {
+        access = null;
+        unavailable = false;
+        BLOCK_STAGE_CACHE.clear();
     }
 
     @Nullable

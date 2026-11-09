@@ -238,6 +238,9 @@ public final class VillagersDelightPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Drop the reflected CustomCrops bridge so a reloaded plugin rebuilds it instead of reusing handles
+        // that belong to the old class loader.
+        com.huidu.villagersdelight.core.CustomCropsCompat.invalidate();
         if (this.aiInjector != null) {
             this.aiInjector.shutdown();
             this.aiInjector = null;
