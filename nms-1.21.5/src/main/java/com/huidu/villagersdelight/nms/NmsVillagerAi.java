@@ -77,7 +77,7 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     private static final Field FOOD_LEVEL = findField(Villager.class, "foodLevel");
 
     private VillagersDelightPlugin plugin;
-    private boolean installed;
+    private volatile boolean installed;
     private final Map<UUID, ScheduledTask> brainChecks =
             new ConcurrentHashMap<>();
     // Villagers whose brain this injector has actually modified. Withdrawing a behaviour only has to visit
@@ -309,16 +309,20 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
             return;
         }
         for (org.bukkit.entity.Villager villager : List.copyOf(injectedVillagers.values())) {
-            if (!villager.isValid()) {
-                injectedVillagers.remove(villager.getUniqueId());
-                continue;
-            }
             if (Bukkit.isOwnedByCurrentRegion(villager)) {
+                if (!villager.isValid()) {
+                    injectedVillagers.remove(villager.getUniqueId());
+                    continue;
+                }
                 removeFrom(villager, behaviorTypes);
             } else {
                 // Reading another region's entity list from here is not region-safe, so the removal is handed
                 // to the villager's own scheduler instead of scanning every world on the calling thread.
-                villager.getScheduler().run(this.plugin, task -> removeFrom(villager, behaviorTypes), null);
+                villager.getScheduler().run(this.plugin, task -> {
+                    if (villager.isValid() && this.installed && this.plugin.isEnabled()) {
+                        removeFrom(villager, behaviorTypes);
+                    }
+                }, null);
             }
         }
     }
@@ -336,19 +340,23 @@ public final class NmsVillagerAi implements VillagerAiInjector, Listener {
     // event (spawn, entity load, career change, brain rebuild) that a running villager never fires again.
     private void installCollectBehavior(Class<?> behaviorType) {
         for (org.bukkit.entity.Villager villager : List.copyOf(injectedVillagers.values())) {
-            if (!villager.isValid()) {
-                injectedVillagers.remove(villager.getUniqueId());
-                continue;
-            }
             try {
                 if (Bukkit.isOwnedByCurrentRegion(villager)) {
+                    if (!villager.isValid()) {
+                        injectedVillagers.remove(villager.getUniqueId());
+                        continue;
+                    }
                     addCollectIfMissing(villager, behaviorType);
                 } else {
                     // The brain is only touched on the villager's own region thread, same as the
                     // withdrawal path: reading another region's entity state from here is not
                     // region-safe. The behaviour is still mode-gated, so a task that runs late after
                     // another switch is a no-op.
-                    villager.getScheduler().run(this.plugin, task -> addCollectIfMissing(villager, behaviorType), null);
+                    villager.getScheduler().run(this.plugin, task -> {
+                        if (villager.isValid() && this.installed && this.plugin.isEnabled()) {
+                            addCollectIfMissing(villager, behaviorType);
+                        }
+                    }, null);
                 }
             } catch (RuntimeException e) {
                 // One unusable villager must not abort the pass; the rest still need the behaviour.

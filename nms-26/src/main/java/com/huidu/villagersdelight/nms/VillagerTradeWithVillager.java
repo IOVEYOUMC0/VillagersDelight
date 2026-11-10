@@ -28,14 +28,21 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
-        if (!super.checkExtraStartConditions(level, body)) return false;
-        return body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET)
-                .filter(target -> Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())).isPresent();
+        // The vanilla super check may inspect the interaction target before our region filter. Resolve and
+        // validate the target first so a foreign-region villager never enters that path.
+        var target = body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET);
+        if (target.isEmpty() || !Bukkit.isOwnedByCurrentRegion(target.get().getBukkitEntity())) {
+            return false;
+        }
+        return super.checkExtraStartConditions(level, body);
     }
 
     @Override
     protected void start(ServerLevel level, Villager myBody, long timestamp) {
         Villager target = (Villager) myBody.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).get();
+        if (!Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())) {
+            return;
+        }
         BehaviorUtils.lockGazeAndWalkToEachOther(myBody, target, 0.5F, 2);
         this.trades = figureOutWhatIAmWillingToTrade(myBody, target);
     }

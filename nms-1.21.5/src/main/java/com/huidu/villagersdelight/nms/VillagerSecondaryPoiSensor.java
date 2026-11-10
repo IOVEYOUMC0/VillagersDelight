@@ -33,7 +33,9 @@ public final class VillagerSecondaryPoiSensor extends Sensor<Villager> {
     protected void doTick(ServerLevel level, Villager entity) {
         ResourceKey<Level> resourceKey = level.dimension();
         BlockPos blockPos = entity.blockPosition();
-        List<GlobalPos> list = new ArrayList<>();
+        Set<net.minecraft.world.level.block.Block> secondaryPoi =
+                entity.getVillagerData().profession().value().secondaryPoi();
+        List<GlobalPos> list = new ArrayList<>(16);
         for (int i1 = -4; i1 <= 4; i1++) {
             for (int i2 = -2; i2 <= 2; i2++) {
                 for (int i3 = -4; i3 <= 4; i3++) {
@@ -42,7 +44,7 @@ public final class VillagerSecondaryPoiSensor extends Sensor<Villager> {
                     if (state.isAir()) {
                         continue;
                     }
-                    if (entity.getVillagerData().profession().value().secondaryPoi().contains(state.getBlock())) {
+                    if (secondaryPoi.contains(state.getBlock())) {
                         list.add(GlobalPos.of(resourceKey, blockPos1));
                         continue;
                     }

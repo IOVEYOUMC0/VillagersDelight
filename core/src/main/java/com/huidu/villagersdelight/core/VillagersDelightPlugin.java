@@ -64,7 +64,7 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     private volatile Set<String> injectedBaseMaterials = Set.of();
     private volatile boolean configNotReady;
     private int configRetryAttempts;
-    private ScheduledTask configRetryTask;
+    private volatile ScheduledTask configRetryTask;
 
     // Vanilla items villagers naturally pick up. A CE seed/food whose base material is one of these is
     // never added to injectedBaseMaterials, so the pickup filter can't cancel a real vanilla pickup.
@@ -238,6 +238,12 @@ public final class VillagersDelightPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        ScheduledTask retry = this.configRetryTask;
+        this.configRetryTask = null;
+        this.configRetryAttempts = 0;
+        if (retry != null) {
+            retry.cancel();
+        }
         // Drop the reflected CustomCrops bridge so a reloaded plugin rebuilds it instead of reusing handles
         // that belong to the old class loader.
         com.huidu.villagersdelight.core.CustomCropsCompat.invalidate();
@@ -376,7 +382,10 @@ public final class VillagersDelightPlugin extends JavaPlugin {
             sender.sendMessage(language.component("messages.target_not_villager"));
             return;
         }
-        openVillagerInventory(sender, villager);
+        // The command callback may run on the player's region, not the target villager's region. The final
+        // access check remains in openVillagerInventory; this hop ensures even Bukkit entity validity/GUI setup
+        // happens on the target's entity scheduler before the NMS inventory is touched.
+        villager.getScheduler().run(this, task -> openVillagerInventory(sender, villager), null);
     }
 
     // Opens a villager's inventory in a standard container GUI so its contents can be inspected and edited.
@@ -509,6 +518,9 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         // 40 × 10 ticks ≈ 20s: CraftEngine's async content load takes about 12s on a slow start, and a
         // shorter window leaves the session at 0 crops until the operator runs /vd reload.
         if (!this.configNotReady || !isEnabled() || this.configRetryAttempts >= 40) {
+            if (!this.configNotReady) {
+                this.configRetryAttempts = 0;
+            }
             if (this.configNotReady) {
                 getLogger().warning("CraftEngine custom items are still unavailable after startup retries; "
                         + "VillagersDelight kept the previous configuration. Run /vd reload once CE has loaded.");
@@ -518,9 +530,15 @@ public final class VillagersDelightPlugin extends JavaPlugin {
         if (this.configRetryTask != null && !this.configRetryTask.isCancelled()) {
             return;
         }
+        if (!isEnabled()) {
+            return;
+        }
         this.configRetryAttempts++;
         this.configRetryTask = Bukkit.getGlobalRegionScheduler().runDelayed(this, task -> {
             this.configRetryTask = null;
+            if (!isEnabled() || task.isCancelled()) {
+                return;
+            }
             if (reloadFromConfig()) {
                 this.configRetryAttempts = 0;
                 getLogger().info("VillagersDelight configuration loaded after CraftEngine became ready.");

@@ -16,7 +16,6 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.bukkit.Bukkit;
-import org.bukkit.craftbukkit.inventory.CraftItemStack;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -29,14 +28,21 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
-        if (!super.checkExtraStartConditions(level, body)) return false;
-        return body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET)
-                .filter(target -> Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())).isPresent();
+        // The vanilla super check may inspect the interaction target before our region filter. Resolve and
+        // validate the target first so a foreign-region villager never enters that path.
+        var target = body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET);
+        if (target.isEmpty() || !Bukkit.isOwnedByCurrentRegion(target.get().getBukkitEntity())) {
+            return false;
+        }
+        return super.checkExtraStartConditions(level, body);
     }
 
     @Override
     protected void start(ServerLevel level, Villager myBody, long timestamp) {
         Villager target = (Villager) myBody.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).get();
+        if (!Bukkit.isOwnedByCurrentRegion(target.getBukkitEntity())) {
+            return;
+        }
         BehaviorUtils.lockGazeAndWalkToEachOther(myBody, target, 0.5F, 2);
         this.trades = figureOutWhatIAmWillingToTrade(myBody, target);
     }
@@ -54,7 +60,10 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
             int[] totals = VillagerItems.foodPointsAndWheat(body);
             boolean threwFood = false;
             if (totals[0] >= 24 && (isFarmer || VillagerItems.foodPointsInInventory(target) < 12)) {
-                throwHalfStack(body, Villager.FOOD_POINTS.keySet(), target, true);
+                // The food variant matches on the villager food value, not on this set: 26.3 turned
+                // Villager.FOOD_POINTS into an item component that cannot be enumerated, and the set was
+                // never read on this path (see throwHalfStack).
+                throwHalfStack(body, Set.of(), target, true);
                 threwFood = true;
             }
             if (isFarmer) {
@@ -85,7 +94,7 @@ public final class VillagerTradeWithVillager extends TradeWithVillager {
             if (!itemStack.isEmpty()) {
                 Item item = itemStack.getItem();
                 boolean custom = CeItemAccess.customItemId(
-                        CraftItemStack.asCraftMirror(itemStack)) != null;
+                        VillagerItems.bukkitStack(itemStack)) != null;
                 if (food ? VillagerItems.foodValue(itemStack) > 0 : !custom && items.contains(item)) {
                     int count;
                     if (itemStack.getCount() > itemStack.getMaxStackSize() / 2) {
