@@ -15,8 +15,9 @@ repositories {
 
 // The Minecraft/Paper dev bundle this layer compiles against. Overridable so a compatibility check can
 // build the same sources against another release without editing this file:
-//   gradlew build -PdevBundle=26.1.2.build.74-stable
-val devBundle = providers.gradleProperty("devBundle").getOrElse("26.3.build.175-stable")
+//   gradlew build -PpaperDevBundle=26.1.2.build.74-stable
+// The explicit name avoids colliding with generic devBundle properties other plugins may read.
+val devBundle = providers.gradleProperty("paperDevBundle").getOrElse("26.3.build.175-stable")
 
 // CraftEngine is resolved from Maven. Overridable so a compatibility check can build the same sources
 // against another release without editing this file:  gradlew build -PceVersion=26.8.2

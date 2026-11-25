@@ -17,8 +17,15 @@ repositories {
 // against another release without editing this file:  gradlew build -PceVersion=26.8.2
 val ceVersion = providers.gradleProperty("ceVersion").getOrElse("26.9.1")
 
+// The 1.21.11 layer is also the compatibility-compile target for 1.21.10. Keep the dev bundle overridable so
+// the CI check actually builds the same sources against 1.21.10 instead of silently reusing 1.21.11:
+//   gradlew build -PpaperDevBundle=1.21.10-R0.1-SNAPSHOT --rerun-tasks
+// The explicit name avoids colliding with generic devBundle properties other plugins may read; quote it in
+// PowerShell because an unquoted argument containing dots can be split by the caller.
+val devBundle = providers.gradleProperty("paperDevBundle").getOrElse("1.21.11-R0.1-SNAPSHOT")
+
 dependencies {
-    paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
+    paperweight.paperDevBundle(devBundle)
     compileOnly("org.jetbrains:annotations:26.1.0")
     // CraftEngine from the official Maven repository.
     compileOnly("net.momirealms:craft-engine-bukkit:$ceVersion")

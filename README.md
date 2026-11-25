@@ -142,11 +142,11 @@ so they cannot share one build). Run `./gradlew shadowJar` inside the module you
 
 - `nms-1.21.5` — Java 21 toolchain, Gradle 9.0, dev bundle `1.21.5-R0.1-SNAPSHOT`.
 - `nms-1211` — Java 21 toolchain, Gradle 9.1, dev bundle `1.21.11-R0.1-SNAPSHOT`.
-  Compatibility check against 1.21.10: `./gradlew build -PdevBundle=1.21.10-R0.1-SNAPSHOT --rerun-tasks`.
+  Compatibility check against 1.21.10: `./gradlew build -PpaperDevBundle=1.21.10-R0.1-SNAPSHOT --rerun-tasks`.
 - `nms-26` — Java 25 toolchain (auto-downloaded via foojay), Gradle 9.1, default dev bundle
   `26.1.2.build.74-stable`. MC 26.1+ requires Java 25, so this module compiles with release 25.
   The bundle is overridable for compatibility checks against another release without editing the build:
-  `./gradlew build -PdevBundle=26.3.build.175-stable`.
+  `./gradlew build -PpaperDevBundle=26.3.build.175-stable`.
 - `nms-263` — Java 25 toolchain, Gradle 9.1, dev bundle `26.3.build.175-stable`.
 
 CraftEngine is compiled against the official Maven 26.9.1 artifacts. Current CE references resolve

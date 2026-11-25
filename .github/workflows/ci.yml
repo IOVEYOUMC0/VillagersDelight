@@ -57,7 +57,7 @@ jobs:
         working-directory: nms-1211
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace build -PdevBundle=1.21.10-R0.1-SNAPSHOT --rerun-tasks
+          ./gradlew --no-daemon --stacktrace build -PpaperDevBundle=1.21.10-R0.1-SNAPSHOT --rerun-tasks
 
       - name: NMS 1.21.11 layer
         working-directory: nms-1211
