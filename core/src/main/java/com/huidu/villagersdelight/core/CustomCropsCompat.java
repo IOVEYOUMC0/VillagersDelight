@@ -189,7 +189,7 @@ public final class CustomCropsCompat {
     /**
      * Per-crop-config answer to "does every stage render as a block", cached by identity.
      *
-     * <p>The scan is (maxPoints + 1) * 2 reflective calls, and {@link #stateAt} runs it for every candidate
+     * The scan is (maxPoints + 1) * 2 reflective calls, and stateAt runs it for every candidate
      * position on every work tick, so a farmer cost thousands of reflective invocations per second. A crop config
      * object is created once per crop type by CustomCrops and its stages do not change while the server runs.
      */

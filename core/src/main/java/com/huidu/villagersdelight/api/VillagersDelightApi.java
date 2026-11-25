@@ -18,17 +18,17 @@ import java.util.Set;
 /**
  * Read-only API for other plugins that need VillagersDelight's crop configuration.
  *
- * <p>All ids are plain {@code namespace:path} strings, so a consumer does not need a CraftEngine
+ * All ids are plain namespace:path strings, so a consumer does not need a CraftEngine
  * dependency for ordinary crop queries. The API reflects the current registry snapshot; it is
- * rebuilt on VillagersDelight reload and cleared on plugin shutdown.</p>
+ * rebuilt on VillagersDelight reload and cleared on plugin shutdown.
  *
- * <p>Call through {@link #get()}; the methods return empty/false when the plugin is absent or its
+ * Call through get; the methods return empty/false when the plugin is absent or its
  * crop registry is not ready yet. Configuration lookups resolve the current registry on every call,
- * and {@link #handle(String)} returns a reload-stable reference; immutable {@link CropInfo} values
- * remain readable after a reload but do not update themselves.</p>
+ * and handle(String) returns a reload-stable reference; immutable CropInfo values
+ * remain readable after a reload but do not update themselves.
  *
- * <p>Live block methods check the caller owns the block's region; on the wrong thread they fail
- * closed (null/false/-1/failure) instead of touching a block owned by another Folia region.</p>
+ * Live block methods check the caller owns the block's region; on the wrong thread they fail
+ * closed (null/false/-1/failure) instead of touching a block owned by another Folia region.
  */
 public final class VillagersDelightApi {
 
@@ -99,7 +99,7 @@ public final class VillagersDelightApi {
         return state != null && crop.isMature(state);
     }
 
-    /** Current growth value of a crop block, or {@code -1} when it is not a configured crop. */
+    /** Current growth value of a crop block, or -1 when it is not a configured crop. */
     public int age(Block block) {
         if (!owns(block)) {
             return -1;
@@ -150,9 +150,9 @@ public final class VillagersDelightApi {
      * Harvests a configured mature crop and spawns its drops at the harvested block, while also
      * returning caller-owned copies.
      *
-     * <p>For a TALL crop, passing either half targets the upper half: the upper block is removed and
+     * For a TALL crop, passing either half targets the upper half: the upper block is removed and
      * the lower stalk is reset. PICK crops are replanted at age 0. The block must be owned by the
-     * current region thread on Folia.</p>
+     * current region thread on Folia.
      */
     public HarvestResult harvest(Block block) {
         return harvest(block, true);
@@ -164,7 +164,7 @@ public final class VillagersDelightApi {
     }
 
     /**
-     * Harvests a configured mature crop. When {@code spawnDrops} is true the returned drops are also
+     * Harvests a configured mature crop. When spawnDrops is true the returned drops are also
      * spawned naturally at the harvested block; otherwise only copies are returned.
      */
     public HarvestResult harvest(Block block, boolean spawnDrops) {

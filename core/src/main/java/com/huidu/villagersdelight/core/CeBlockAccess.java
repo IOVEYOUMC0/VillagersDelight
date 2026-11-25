@@ -51,7 +51,7 @@ public final class CeBlockAccess {
 
     /**
      * Drops declared by the custom block's configured loot table. The returned stacks are copies;
-     * callers own them. CE event-function drops are collected separately by {@link #eventDrops}.
+     * callers own them. CE event-function drops are collected separately by eventDrops.
      */
     public static List<ItemStack> configuredDrops(Block block) {
         ImmutableBlockState state = customStateAt(block);
@@ -78,7 +78,7 @@ public final class CeBlockAccess {
 
     /**
      * Executes the custom block's CE event functions while capturing natural item drops, so a
-     * function-based loot table (for example {@code drop_loot}) is included in the returned list.
+     * function-based loot table (for example drop_loot) is included in the returned list.
      * Non-item effects still run normally.
      */
     public static List<ItemStack> eventDrops(Block block, EventTrigger trigger) {

@@ -5,12 +5,12 @@ import org.bukkit.inventory.ItemStack;
 import java.util.List;
 
 /**
- * Result of {@link VillagersDelightApi#harvest(org.bukkit.block.Block)}.
+ * Result of block.Block).
  *
- * <p>The returned stacks are copies owned by the caller. {@code harvest(Block)} spawns the same
- * drops at the harvested block as well; use {@code harvestPreview(Block)} (or
- * {@code harvest(Block, false)}) when only copies are wanted. When {@code harvested} is false the
- * block was not a configured mature crop and was left untouched.</p>
+ * The returned stacks are copies owned by the caller. harvest(Block) spawns the same
+ * drops at the harvested block as well; use harvestPreview(Block) (or
+ * harvest(Block, false)) when only copies are wanted. When harvested is false the
+ * block was not a configured mature crop and was left untouched.
  */
 public record HarvestResult(boolean harvested, List<ItemStack> drops) {
 

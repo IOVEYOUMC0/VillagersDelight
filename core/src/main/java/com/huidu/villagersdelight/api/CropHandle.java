@@ -9,10 +9,10 @@ import java.util.Optional;
 /**
  * A reload-stable reference to one configured crop.
  *
- * <p>Unlike {@link CropInfo}, which is an immutable snapshot, a handle stores only the crop block
+ * Unlike CropInfo, which is an immutable snapshot, a handle stores only the crop block
  * id. Its methods resolve the current registry every time, so a handle obtained before a
  * VillagersDelight reload keeps working and reports the reloaded definition instead of pointing at
- * an invalidated old registry object.</p>
+ * an invalidated old registry object.
  */
 public final class CropHandle {
 
