@@ -1,7 +1,8 @@
 name: CI
 
 # VillagersDelight is a multi-module build: core/launcher run on Gradle 8.14.2 with a Java 21 toolchain, the
-# NMS layers on Gradle 9.0/9.1 (nms-26 asks for a Java 25 toolchain), and each module carries its own wrapper.
+# NMS layers on Gradle 9.0/9.1 (nms-26 and nms-263 ask for a Java 25 toolchain), and each module carries
+# its own wrapper.
 # Every module is therefore built with its own wrapper, after the modules it consumes, because launcher merges
 # their build/libs jars into the shaded plugin jar.
 #
@@ -44,7 +45,7 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace build
-          ./gradlew --no-daemon checkFoodRules checkCraftMirror checkBehaviorWithdraw checkServerCompatibility
+          ./gradlew --no-daemon checkFoodRules checkCraftMirror checkBehaviorWithdraw checkServerCompatibility checkApi
 
       - name: NMS 1.21.5 layer
         working-directory: nms-1.21.5
@@ -58,8 +59,14 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace build
 
-      - name: NMS 26.x layer
+      - name: NMS 26.1/26.2 layer
         working-directory: nms-26
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace build
+
+      - name: NMS 26.3 layer
+        working-directory: nms-263
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace build

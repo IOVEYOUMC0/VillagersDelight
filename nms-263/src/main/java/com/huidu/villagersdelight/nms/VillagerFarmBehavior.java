@@ -1,0 +1,650 @@
+package com.huidu.villagersdelight.impl263;
+
+import com.huidu.villagersdelight.impl263.common.VillagerAiSettings;
+import com.huidu.villagersdelight.impl263.common.VillagerItems;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import com.huidu.villagersdelight.impl263.common.VillagerBlockAccess;
+import com.huidu.villagersdelight.core.CeBlockAccess;
+import com.huidu.villagersdelight.core.CeItemAccess;
+import com.huidu.villagersdelight.core.CustomCropsCompat;
+import com.huidu.villagersdelight.core.CropRegistry;
+import com.huidu.villagersdelight.core.SeedSlotSignature;
+import com.huidu.villagersdelight.core.VillagersDelightPlugin;
+import com.huidu.villagersdelight.core.FDCrop;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.ai.behavior.BlockPosTracker;
+import net.minecraft.world.entity.ai.behavior.HarvestFarmland;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.ai.memory.WalkTarget;
+import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.LevelEvent;
+import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.CropBlock;
+import net.minecraft.world.level.block.FarmlandBlock;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.level.material.FluidState;
+import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
+import net.momirealms.craftengine.bukkit.world.BukkitExistingBlock;
+import net.momirealms.craftengine.core.block.ImmutableBlockState;
+import net.momirealms.craftengine.core.item.Item;
+import net.momirealms.craftengine.core.plugin.context.ContextHolder;
+import net.momirealms.craftengine.core.plugin.context.EventTrigger;
+import net.momirealms.craftengine.core.plugin.context.function.Function;
+import net.momirealms.craftengine.core.plugin.context.PlayerOptionalContext;
+import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
+import net.momirealms.craftengine.core.entity.player.InteractionHand;
+import net.momirealms.craftengine.core.util.Key;
+import net.momirealms.craftengine.core.util.Cancellable;
+import net.momirealms.craftengine.core.world.World;
+import net.momirealms.craftengine.core.world.WorldPosition;
+import org.bukkit.Location;
+import org.bukkit.craftbukkit.event.CraftEventFactory;
+
+import java.util.ArrayList;
+import java.util.List;
+
+// Replacement for the vanilla HarvestFarmland (26.x). Reproduces the vanilla logic so Purpur /
+// Paper behaviour (mob-griefing, EntityChangeBlockEvent) is preserved, and extends it with FD crop
+// handling: mature CE crops are harvested, CE seeds are planted on farmland and rich soil.
+public final class VillagerFarmBehavior extends HarvestFarmland {
+
+    private BlockPos aboveFarmlandPos;
+    private long nextOkStartTime;
+    private int timeWorkedSoFar;
+    private final List<BlockPos> validFarmlandAroundVillager = new ArrayList<>();
+
+    // Decode sowable inventory once per start-condition scan and reuse it for all 27 cells.
+    // Inventory contents do not depend on the candidate cell.
+    private record SeedSlot(FDCrop crop, String customCropsId, boolean vanillaSeed) {
+    }
+
+    private final List<SeedSlot> seedSlots = new ArrayList<>();
+    // Reuse decoded seeds until inventory identity or crop rules change.
+    private boolean seedSlotsDecoded;
+    private long seedSlotsSignature;
+    private CropRegistry seedSlotsRegistry;
+
+    private void decodeSeedSlots(Villager villager) {
+        SimpleContainer inventory = villager.getInventory();
+        CropRegistry registry = CropRegistry.instance();
+        long signature = seedSlotsSignature(inventory);
+        if (this.seedSlotsDecoded && registry == this.seedSlotsRegistry
+                && signature == this.seedSlotsSignature) {
+            return;
+        }
+        this.seedSlotsDecoded = true;
+        this.seedSlotsSignature = signature;
+        this.seedSlotsRegistry = registry;
+        this.seedSlots.clear();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            // A mirror is enough: everything below only reads the stack, and unlike asBukkitCopy it does not
+            // deep-copy the component patch of every slot on every scan.
+            org.bukkit.inventory.ItemStack bukkit = VillagerItems.bukkitStack(stack);
+            FDCrop crop = configuredSeed(bukkit);
+            String customCropsId = CustomCropsCompat.isAvailable() ? CustomCropsCompat.cropId(bukkit) : null;
+            boolean vanillaSeed = this.isVanillaSeed(stack, bukkit);
+            if (crop != null || customCropsId != null || vanillaSeed) {
+                this.seedSlots.add(new SeedSlot(crop, customCropsId, vanillaSeed));
+            }
+        }
+        VillagersDelightPlugin.debug("farm: decoded " + this.seedSlots.size() + " seed slot(s)");
+    }
+
+    // Item identity, emptiness and the data component patch per slot. Two different CE items share a base
+    // material, so the patch has to be part of the signature; otherwise a custom seed swapped in for a vanilla
+    // item of the same material would keep reusing a stale decode.
+    private static long seedSlotsSignature(SimpleContainer inventory) {
+        long signature = SeedSlotSignature.start();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            boolean empty = stack.isEmpty();
+            signature = SeedSlotSignature.fold(signature, empty,
+                    empty ? 0 : stack.getItem().hashCode(),
+                    empty ? 0 : stack.getComponentsPatch().hashCode());
+        }
+        return signature;
+    }
+
+    @Override
+    protected boolean checkExtraStartConditions(ServerLevel level, Villager villager) {
+        if (!VillagerItems.isFarmer(villager)) return false;
+        if (!level.getGameRules().get(GameRules.MOB_GRIEFING)) {
+            return false;
+        }
+        this.decodeSeedSlots(villager);
+        BlockPos.MutableBlockPos mut = villager.blockPosition().mutable();
+        this.validFarmlandAroundVillager.clear();
+        for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int z = -1; z <= 1; z++) {
+                    mut.set(villager.getX() + x, villager.getY() + y, villager.getZ() + z);
+                    if (this.isValidTarget(mut, level, villager)) {
+                        // BlockPos lost its Vec3i/Vec3i-subtype copy constructor in 26.3, so the
+                        // coordinates are copied explicitly (this compiles on every 26.x release).
+                        this.validFarmlandAroundVillager.add(new BlockPos(mut.getX(), mut.getY(), mut.getZ()));
+                    }
+                }
+            }
+        }
+        this.aboveFarmlandPos = this.validFarmlandAroundVillager.isEmpty()
+                ? null
+                : this.validFarmlandAroundVillager.get(level.getRandom().nextInt(this.validFarmlandAroundVillager.size()));
+        return this.aboveFarmlandPos != null;
+    }
+
+    private boolean isValidTarget(BlockPos pos, ServerLevel level, Villager villager) {
+        BlockState state = level.getBlockState(pos);
+        Block block = state.getBlock();
+        // Harvest targets are valid regardless of what the villager holds.
+        if (block instanceof CropBlock crop && crop.isMaxAge(state)) {
+            return true;
+        }
+        ImmutableBlockState ceState = VillagerBlockAccess.ceStateOf(state);
+        if (ceState != null && CropRegistry.matureCropOf(ceState) != null) {
+            return true;
+        }
+        // Reflective CustomCrops lookups only make sense when that plugin is installed; without the guard
+        // every non-mature cell of the 3x3x3 scan below pays for one.
+        if (CustomCropsCompat.isAvailable()) {
+            CustomCropsCompat.State customCrop = CustomCropsCompat.stateAt(level.getWorld(),
+                    pos.getX(), pos.getY(), pos.getZ());
+            if (customCrop != null && customCrop.mature()) {
+                return true;
+            }
+        }
+        // Plant targets are only valid if the villager carries a seed it can actually sow here; otherwise it
+        // walks over and stares at a spot it can never plant (e.g. rice, a water crop, on dry rich soil).
+        // Carrying nothing sowable means no plant target can be valid, so skip the spot test entirely.
+        if (this.seedSlots.isEmpty()) {
+            return false;
+        }
+        boolean plantSpot = (state.isAir() && this.isVanillaFarmland(level, pos))
+                || this.isPlantableWater(level, pos)
+                || (state.isAir() && this.isCePlantableSoil(level, pos.below()))
+                || (CustomCropsCompat.isAvailable() && CustomCropsCompat.isPotentialPlantingSpot(
+                        new Location(level.getWorld(), pos.getX(), pos.getY(), pos.getZ())));
+        return plantSpot && this.hasPlantableSeedFor(level, pos);
+    }
+
+    // Read-only twin of plantSeeds' matching: whether any decoded slot holds a seed sowable at pos, so a
+    // plant spot is only selected as a target when planting would actually happen. plantSeeds keeps
+    // reading the real inventory, because it mutates it.
+    private boolean hasPlantableSeedFor(ServerLevel level, BlockPos pos) {
+        for (SeedSlot slot : this.seedSlots) {
+            if (slot.crop() != null && canPlantHere(level, pos, slot.crop())
+                    && (!slot.vanillaSeed() || !this.isVanillaFarmland(level, pos))) {
+                return true;
+            }
+            if (slot.customCropsId() != null && CustomCropsCompat.canPlantAt(
+                    new Location(level.getWorld(), pos.getX(), pos.getY(), pos.getZ()), slot.customCropsId())) {
+                return true;
+            }
+            if (slot.customCropsId() == null && slot.vanillaSeed()
+                    && this.isVanillaPlantingSpot(level, pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    protected void start(ServerLevel level, Villager villager, long gameTime) {
+        if (gameTime > this.nextOkStartTime && this.aboveFarmlandPos != null) {
+            villager.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new BlockPosTracker(this.aboveFarmlandPos));
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
+                    new WalkTarget(new BlockPosTracker(this.standableWalkTarget(level, this.aboveFarmlandPos, villager)), 0.5F, 1));
+        }
+    }
+
+    @Override
+    protected void stop(ServerLevel level, Villager villager, long gameTime) {
+        villager.getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
+        villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+        this.timeWorkedSoFar = 0;
+        this.nextOkStartTime = gameTime + VillagerAiSettings.FARM_STOP_COOLDOWN;
+    }
+
+    @Override
+    protected void tick(ServerLevel level, Villager villager, long gameTime) {
+        // Work water targets from a dry neighboring cell because navigation avoids wading.
+        // Allow squared reach 2.25 for diagonal neighbors, including unplanted water targets;
+        // the land-crop limit of 1.0 cannot reach these cells.
+        double reach = this.aboveFarmlandPos != null && (this.isTallWaterCell(level, this.aboveFarmlandPos)
+                || this.isPlantableWater(level, this.aboveFarmlandPos)
+                || this.isCustomCropTarget(level, this.aboveFarmlandPos)) ? 2.0 : 1.0;
+        if (this.aboveFarmlandPos == null
+                || this.aboveFarmlandPos.closerToCenterThan(villager.position(),
+                        reach)) {
+            if (this.aboveFarmlandPos != null && gameTime > this.nextOkStartTime) {
+                BlockState state = level.getBlockState(this.aboveFarmlandPos);
+                Block block = state.getBlock();
+
+                // Harvest a mature FD crop first; the CE block state is resolved through the
+                // CraftEngine proxy because the vanilla state only shows the base block.
+                ImmutableBlockState ceState = VillagerBlockAccess.ceStateAt(level, this.aboveFarmlandPos);
+                FDCrop fdCrop = ceState == null ? null : CropRegistry.matureCropOf(ceState);
+                CustomCropsCompat.State customCrop = CustomCropsCompat.isAvailable()
+                        ? CustomCropsCompat.stateAt(level.getWorld(), this.aboveFarmlandPos.getX(),
+                                this.aboveFarmlandPos.getY(), this.aboveFarmlandPos.getZ())
+                        : null;
+                boolean harvested = false;
+                if (fdCrop != null) {
+                    if (CraftEventFactory.callEntityChangeBlockEvent(villager, this.aboveFarmlandPos, state)) {
+                        harvested = this.harvestFdCrop(level, villager, this.aboveFarmlandPos, fdCrop);
+                        if (harvested) {
+                            VillagersDelightPlugin.debug("harvest: " + fdCrop.blockId() + " at " + this.aboveFarmlandPos);
+                        }
+                    }
+                } else if (customCrop != null && customCrop.mature()) {
+                    if (CraftEventFactory.callEntityChangeBlockEvent(villager, this.aboveFarmlandPos, state)) {
+                        harvested = CustomCropsCompat.harvest(new Location(level.getWorld(),
+                                this.aboveFarmlandPos.getX(), this.aboveFarmlandPos.getY(), this.aboveFarmlandPos.getZ()));
+                    }
+                } else if (block instanceof CropBlock crop && crop.isMaxAge(state)) {
+                    if (CraftEventFactory.callEntityChangeBlockEvent(villager, this.aboveFarmlandPos, state.getFluidState().createLegacyBlock())) {
+                        level.destroyBlock(this.aboveFarmlandPos, true, villager);
+                        harvested = true;
+                    }
+                }
+
+                // Plant seeds on vanilla farmland, extra soil, or on a fluid spot whose bed
+                // accepts the crop.
+                boolean planted = false;
+                if (state.isAir() && (this.isVanillaFarmland(level, this.aboveFarmlandPos)
+                        || this.isCePlantableSoil(level, this.aboveFarmlandPos.below()))) {
+                    planted = this.plantSeeds(level, villager, this.aboveFarmlandPos);
+                } else if (this.isPlantableWater(level, this.aboveFarmlandPos)) {
+                    planted = this.plantSeeds(level, villager, this.aboveFarmlandPos);
+                } else if (CustomCropsCompat.isPotentialPlantingSpot(new Location(level.getWorld(),
+                        this.aboveFarmlandPos.getX(), this.aboveFarmlandPos.getY(), this.aboveFarmlandPos.getZ()))) {
+                    planted = this.plantSeeds(level, villager, this.aboveFarmlandPos);
+                }
+
+                // Move on if the crop is not mature yet, or if nothing productive happened at this
+                // target this tick (an empty plantable spot the villager could not plant on for lack
+                // of a matching seed) — otherwise it stands and stares until canStillUse expires. The
+                // harvested guard leaves the just-harvested tick alone so the next tick can still
+                // replant, matching vanilla's harvest-then-replant-then-move flow.
+                if (block instanceof CropBlock crop && !crop.isMaxAge(state)) {
+                    this.switchTarget(level, villager, gameTime);
+                } else if (ceState != null && CropRegistry.cropOf(ceState) != null && CropRegistry.matureCropOf(ceState) == null) {
+                    this.switchTarget(level, villager, gameTime);
+                } else if (customCrop != null && !customCrop.mature()) {
+                    this.switchTarget(level, villager, gameTime);
+                } else if (!harvested && !planted) {
+                    this.switchTarget(level, villager, gameTime);
+                }
+            }
+            this.timeWorkedSoFar++;
+        }
+    }
+
+    private boolean isCustomCropTarget(ServerLevel level, BlockPos pos) {
+        ImmutableBlockState ce = VillagerBlockAccess.ceStateAt(level, pos);
+        if (ce != null && CropRegistry.cropOf(ce) != null) {
+            return true;
+        }
+        CustomCropsCompat.State custom = CustomCropsCompat.stateAt(level.getWorld(), pos.getX(), pos.getY(), pos.getZ());
+        return custom != null;
+    }
+
+    private void switchTarget(ServerLevel level, Villager villager, long gameTime) {
+        this.validFarmlandAroundVillager.remove(this.aboveFarmlandPos);
+        this.aboveFarmlandPos = this.validFarmlandAroundVillager.isEmpty()
+                ? null
+                : this.validFarmlandAroundVillager.get(level.getRandom().nextInt(this.validFarmlandAroundVillager.size()));
+        if (this.aboveFarmlandPos != null) {
+            this.nextOkStartTime = gameTime + VillagerAiSettings.FARM_RETARGET_DELAY;
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
+                    new WalkTarget(new BlockPosTracker(this.standableWalkTarget(level, this.aboveFarmlandPos, villager)), 0.5F, 1));
+            villager.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new BlockPosTracker(this.aboveFarmlandPos));
+        }
+    }
+
+    private boolean harvestFdCrop(ServerLevel level, Villager villager, BlockPos pos, FDCrop crop) {
+        if (crop.harvestMode() == FDCrop.HarvestMode.TALL) {
+            // Two-block crop: harvest only the mature upper half and reset the lower half so the
+            // stalk regrows; the stalk itself is never removed.
+            this.breakCeBlock(level, pos);
+            this.resetLowerAfterUpperHarvest(level, pos.below(), crop);
+            return true;
+        }
+        if (crop.harvestMode() == FDCrop.HarvestMode.PICK) {
+            // Right-click style harvest (tomatoes): trigger the CE right-click event so the
+            // configured pick loot drops and the vine resets to age 0 like a player interaction.
+            return this.rightClickCeBlock(level, pos, crop);
+        }
+        this.breakCeBlock(level, pos);
+        return true;
+    }
+
+    private void resetLowerAfterUpperHarvest(ServerLevel level, BlockPos lowerPos, FDCrop crop) {
+        ImmutableBlockState lower = VillagerBlockAccess.ceStateAt(level, lowerPos);
+        if (lower == null) {
+            return;
+        }
+        ImmutableBlockState reset = crop.resetAfterUpperHarvest(lower);
+        if (reset != lower) {
+            CeBlockAccess.placeState(level.getWorld().getBlockAt(lowerPos.getX(), lowerPos.getY(), lowerPos.getZ()), reset);
+        }
+    }
+
+    // Whether the block at pos is the water cell of a planted TALL crop (its lower half). The cell
+    // renders and flows like water, so a villager that paths into it swims in place; the farm
+    // behavior must walk to a dry neighbor instead.
+    private boolean isTallWaterCell(ServerLevel level, BlockPos pos) {
+        ImmutableBlockState ce = VillagerBlockAccess.ceStateAt(level, pos);
+        if (ce == null) {
+            return false;
+        }
+        FDCrop crop = CropRegistry.cropOf(ce);
+        return crop != null && crop.harvestMode() == FDCrop.HarvestMode.TALL && !crop.isUpperHalf(ce);
+    }
+
+    private boolean isStandableCell(ServerLevel level, BlockPos pos, Villager villager) {
+        if (!level.getBlockState(pos).getFluidState().isEmpty()) {
+            return false;
+        }
+        if (this.isTallWaterCell(level, pos)) {
+            return false;
+        }
+        BlockState below = level.getBlockState(pos.below());
+        return below.entityCanStandOn(level, pos.below(), villager);
+    }
+
+    // Walk target for a paddy crop (its water cell or an unplanted water spot): moves the target to
+    // the nearest standable horizontal neighbor so the villager harvests/plants from dry land
+    // instead of wading into the water and getting stuck spinning.
+    private BlockPos standableWalkTarget(ServerLevel level, BlockPos target, Villager villager) {
+        if (!this.isTallWaterCell(level, target) && !this.isPlantableWater(level, target)) {
+            return target;
+        }
+        BlockPos best = null;
+        int bestDist = Integer.MAX_VALUE;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                BlockPos candidate = target.offset(dx, 0, dz);
+                if (this.isStandableCell(level, candidate, villager)) {
+                    int dist = dx * dx + dz * dz;
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = candidate;
+                    }
+                }
+            }
+        }
+        return best != null ? best : target;
+    }
+
+    // Triggers the CE right-click event (use_on) on a custom block without a player, so PICK crops
+    // drop their configured pick loot and reset to age 0 exactly like a player interaction.
+    private boolean rightClickCeBlock(ServerLevel level, BlockPos pos, FDCrop crop) {
+        ImmutableBlockState ceState = VillagerBlockAccess.ceStateAt(level, pos);
+        if (ceState == null) {
+            return false;
+        }
+        try {
+            World ceWorld =
+                    BukkitAdaptor.adapt(level.getWorld());
+            WorldPosition position = new WorldPosition(ceWorld,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+            Cancellable event = Cancellable.dummy();
+            PlayerOptionalContext context = PlayerOptionalContext.of(null, ContextHolder.builder()
+                    .withParameter(DirectContextParameters.BLOCK,
+                            new BukkitExistingBlock(
+                                    level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ())))
+                    .withParameter(DirectContextParameters.POSITION, position)
+                    .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState)
+                    .withParameter(DirectContextParameters.HAND, InteractionHand.MAIN_HAND)
+                    .withParameter(DirectContextParameters.EVENT, event));
+            Function.execute(context, ceState.owner().value().eventFunctions(EventTrigger.RIGHT_CLICK));
+            ImmutableBlockState after = VillagerBlockAccess.ceStateAt(level, pos);
+            boolean ok = !event.isCancelled() && after != null && !crop.isMature(after);
+            if (!ok) {
+                VillagersDelightPlugin.debug("pick: right-click did not harvest at " + pos
+                        + " cancelled=" + event.isCancelled()
+                        + " afterState=" + (after == null ? "null" : after.owner().value().id())
+                        + " stillMature=" + (after != null && crop.isMature(after)));
+            }
+            return ok;
+        } catch (RuntimeException | LinkageError t) {
+            VillagersDelightPlugin.debug("harvest: CE right-click event failed at " + pos + ": " + t);
+            return false;
+        }
+    }
+
+    private void breakCeBlock(ServerLevel level, BlockPos pos) {
+        // A crop declares its drops in one of two places: a block loot table (wheat, beetroots, carrots,
+        // potatoes, onions, cabbages and the budding tomato all use default:loot_table/seed_crop) or the
+        // "on break" event functions (rice and any addon that builds its loot with drop_loot). A player break
+        // produces both - CraftEngine runs the event functions and its block-loot listener replaces the vanilla
+        // drops with the loot table - so a villager harvest has to drop both as well, with a player-less context
+        // so player-dependent entries (fortune, has_player) fall back to their base drops.
+        ImmutableBlockState ceState = VillagerBlockAccess.ceStateAt(level, pos);
+        int dropped = 0;
+        if (ceState != null) {
+            try {
+                World ceWorld =
+                        BukkitAdaptor.adapt(level.getWorld());
+                WorldPosition position = new WorldPosition(ceWorld,
+                        pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+                ContextHolder.Builder builder = ContextHolder.builder()
+                        .withParameter(DirectContextParameters.BLOCK,
+                                new BukkitExistingBlock(
+                                        level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ())))
+                        .withParameter(DirectContextParameters.POSITION, position)
+                        .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, ceState);
+                for (Item item : ceState.getDrops(builder.build(), ceWorld, null)) {
+                    ceWorld.dropItemNaturally(position, item);
+                    dropped++;
+                }
+                Function.execute(PlayerOptionalContext.of(null, builder),
+                        ceState.owner().value().eventFunctions(EventTrigger.BLOCK_BREAK));
+            } catch (RuntimeException | LinkageError t) {
+                VillagersDelightPlugin.debug("harvest: CE break drop failed at " + pos + ": " + t);
+            }
+        }
+        // Break particles and sound. The BLOCK_BREAK_EFFECT level event drives the client break
+        // feedback; CraftEngine intercepts it and maps the sound to the custom block's own break
+        // sound, so a single call covers both effects.
+        BlockState state = level.getBlockState(pos);
+        level.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, pos, Block.getId(state));
+        boolean removed = CeBlockAccess.removeBlock(
+                level.getWorld().getBlockAt(pos.getX(), pos.getY(), pos.getZ()));
+        if (!removed) {
+            VillagersDelightPlugin.debug("break: CE removeBlock returned false at " + pos);
+        }
+        // Reported so a missing drop is visible in the debug log instead of only being noticed in game.
+        VillagersDelightPlugin.debug("harvest: " + (dropped == 0 ? "no loot table drops" : dropped + " loot table drop(s)")
+                + " at " + pos);
+    }
+
+    private boolean plantSeeds(ServerLevel level, Villager villager, BlockPos pos) {
+        SimpleContainer inventory = villager.getInventory();
+        // Prefer vanilla-compatible seeds when both vanilla and addon seeds are available.
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = 0; i < inventory.getContainerSize(); i++) {
+                ItemStack stack = inventory.getItem(i);
+                if (stack.isEmpty()) {
+                    continue;
+                }
+                // A mirror is enough for the id lookups below, and it avoids copying the component patch.
+                org.bukkit.inventory.ItemStack bukkit = VillagerItems.bukkitStack(stack);
+                if ((pass == 0) != this.isVanillaSeed(stack, bukkit)) {
+                    continue;
+                }
+                FDCrop fdCrop = configuredSeed(bukkit);
+                if (fdCrop != null && canPlantHere(level, pos, fdCrop)
+                        && (!this.isVanillaSeed(stack, bukkit) || !this.isVanillaFarmland(level, pos))) {
+                    if (!this.plantFdCrop(level, villager, pos, fdCrop)) {
+                        return false;
+                    }
+                    VillagersDelightPlugin.debug("plant: " + fdCrop.blockId() + " at " + pos + " from " + stack);
+                    stack.shrink(1);
+                    return true;
+                }
+                String customCropId = CustomCropsCompat.isAvailable() ? CustomCropsCompat.cropId(bukkit) : null;
+                Location customCropLocation = new Location(level.getWorld(), pos.getX(), pos.getY(), pos.getZ());
+                if (customCropId != null && CustomCropsCompat.canPlantAt(customCropLocation, customCropId)) {
+                    if (!CraftEventFactory.callEntityChangeBlockEvent(villager, pos, level.getBlockState(pos))) {
+                        return false;
+                    }
+                    if (!CustomCropsCompat.place(customCropLocation, customCropId)) {
+                        return false;
+                    }
+                    level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(villager, level.getBlockState(pos)));
+                    stack.shrink(1);
+                    return true;
+                }
+                if (customCropId == null && this.isVanillaSeed(stack, bukkit) && this.isVanillaPlantingSpot(level, pos)
+                        && stack.getItem() instanceof BlockItem blockItem) {
+                    BlockState toPlace = blockItem.getBlock().defaultBlockState();
+                    if (!CraftEventFactory.callEntityChangeBlockEvent(villager, pos, toPlace)) {
+                        return false;
+                    }
+                    level.setBlockAndUpdate(pos, toPlace);
+                    level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(villager, toPlace));
+                    level.playSound(null, pos.getX(), pos.getY(), pos.getZ(),
+                            SoundEvents.CROP_PLANTED, SoundSource.BLOCKS, 1.0F, 1.0F);
+                    stack.shrink(1);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isVanillaSeed(ItemStack stack, org.bukkit.inventory.ItemStack bukkit) {
+        return CeItemAccess.customItemId(bukkit) == null
+                && stack.is(ItemTags.VILLAGER_PLANTABLE_SEEDS) && stack.getItem() instanceof BlockItem;
+    }
+
+    private boolean isVanillaPlantingSpot(ServerLevel level, BlockPos pos) {
+        return level.getBlockState(pos).isAir() && level.getBlockState(pos).getFluidState().isEmpty()
+                && (this.isVanillaFarmland(level, pos)
+                || this.isCePlantableSoil(level, pos.below()));
+    }
+
+    private boolean isVanillaFarmland(ServerLevel level, BlockPos pos) {
+        BlockPos belowPos = pos.below();
+        return VillagerBlockAccess.ceStateAt(level, belowPos) == null
+                && level.getBlockState(belowPos).getBlock() instanceof FarmlandBlock;
+    }
+
+    // CraftItemStack.asBukkitCopy deep-copies the stack including its component patch, and the WORK
+    // activity re-checks its start conditions every tick over the whole 27-cell area. The copy is
+    // therefore taken once per inventory slot by the caller and threaded through here.
+    private FDCrop configuredSeed(org.bukkit.inventory.ItemStack bukkit) {
+        Key custom = CeItemAccess.customItemId(bukkit);
+        if (custom != null) {
+            return CropRegistry.cropBySeed(custom);
+        }
+        if (bukkit.getType().isAir()) {
+            return null;
+        }
+        return CropRegistry.cropBySeed(Key.of(bukkit.getType().getKey().toString()));
+    }
+
+    private boolean canPlantHere(ServerLevel level, BlockPos pos, FDCrop crop) {
+        if (VillagerBlockAccess.ceStateAt(level, pos) != null) {
+            return false;
+        }
+        if (crop.water() != null) {
+            return this.isPlantableWater(level, pos, crop);
+        }
+        // Without a configured water id the crop plants on dry soil only.
+        if (!level.getBlockState(pos).isAir() || !level.getBlockState(pos).getFluidState().isEmpty()) {
+            return false;
+        }
+        ImmutableBlockState ceBelow = VillagerBlockAccess.ceStateAt(level, pos.below());
+        if (ceBelow != null) {
+            return CropRegistry.canPlantOn(crop, ceBelow);
+        }
+        return level.getBlockState(pos.below()).getBlock() instanceof FarmlandBlock;
+    }
+
+    // Whether a position is a planting spot for any crop with a configured water id: a fluid
+    // matching the crop's water above an accepted soil bed.
+    private boolean isPlantableWater(ServerLevel level, BlockPos pos) {
+        for (FDCrop crop : CropRegistry.waterCrops()) {
+            if (this.isPlantableWater(level, pos, crop)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isPlantableWater(ServerLevel level, BlockPos pos, FDCrop crop) {
+        BlockState target = level.getBlockState(pos);
+        if (!(target.getBlock() instanceof LiquidBlock) || VillagerBlockAccess.ceStateOf(target) != null) {
+            return false;
+        }
+        FluidState fluidState = target.getFluidState();
+        if (fluidState.isEmpty() || !crop.matchesWater(fluidKeyOf(fluidState))) {
+            return false;
+        }
+        if (!fluidState.isSource()) {
+            return false;
+        }
+        Key belowId = Key.of(level.getWorld().getBlockAt(pos.getX(), pos.getY() - 1, pos.getZ())
+                .getType().getKey().toString());
+        if (crop.soils().contains(belowId)) {
+            return true;
+        }
+        ImmutableBlockState ceBelow = VillagerBlockAccess.ceStateAt(level, pos.below());
+        return ceBelow != null && crop.soils().contains(ceBelow.owner().value().id());
+    }
+
+    // Registry id of the fluid at a position, e.g. minecraft:water.
+    private static Key fluidKeyOf(FluidState fluidState) {
+        return Key.of(String.valueOf(BuiltInRegistries.FLUID.getKey(fluidState.getType())));
+    }
+
+    private boolean isCePlantableSoil(ServerLevel level, BlockPos pos) {
+        ImmutableBlockState ce = VillagerBlockAccess.ceStateAt(level, pos);
+        return ce != null && CropRegistry.isPlantableSoil(ce);
+    }
+
+    private boolean plantFdCrop(ServerLevel level, Villager villager, BlockPos pos, FDCrop fdCrop) {
+        if (!this.canPlantHere(level, pos, fdCrop)) {
+            return false;
+        }
+        Key plantBlock = fdCrop.plantBlock();
+        Object placeState = CeBlockAccess.placeStateMinecraft(plantBlock);
+        if (placeState instanceof BlockState blockState
+                && CraftEventFactory.callEntityChangeBlockEvent(villager, pos, blockState)) {
+            Location location = new Location(level.getWorld(), pos.getX(), pos.getY(), pos.getZ());
+            // Report the real placement result: a refused placement (protection plugin, position taken
+            // since canPlantHere ran) must not report success, because plantSeeds shrinks the seed stack
+            // on true and the villager would lose the seed without a block appearing.
+            if (CeBlockAccess.placeCrop(location, plantBlock, 0, true)) {
+                level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(villager, level.getBlockState(pos)));
+                return true;
+            }
+            VillagersDelightPlugin.debug("plant: CE place refused " + plantBlock + " at " + pos);
+        }
+        return false;
+    }
+
+    @Override
+    protected boolean canStillUse(ServerLevel level, Villager villager, long gameTime) {
+        return this.timeWorkedSoFar < VillagerAiSettings.FARM_WORK_DURATION;
+    }
+}

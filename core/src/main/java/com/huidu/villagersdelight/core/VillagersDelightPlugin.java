@@ -150,10 +150,15 @@ public final class VillagersDelightPlugin extends JavaPlugin {
     }
 
     // Ordered newest-first. FarmlandBlock is the 26.x rename of FarmBlock; the villager class moved from
-    // npc.Villager to npc.villager.Villager in 1.21.9.
+    // npc.Villager to npc.villager.Villager in 1.21.9. Paper 26.3 changed six NMS symbols, so it gets its
+    // own impl263 layer built against the 26.3 stable dev bundle; impl26 stays on the 26.1/26.2 anchor.
     private static final List<NmsCandidate> NMS_CANDIDATES = List.of(
+            new NmsCandidate("com.huidu.villagersdelight.impl263.NmsVillagerAi",
+                    List.of("26.3"),
+                    List.of("net.minecraft.world.level.block.FarmlandBlock",
+                            "net.minecraft.world.entity.npc.villager.Villager")),
             new NmsCandidate("com.huidu.villagersdelight.impl26.NmsVillagerAi",
-                    List.of("26."),
+                    List.of("26.1.", "26.2"),
                     List.of("net.minecraft.world.level.block.FarmlandBlock",
                             "net.minecraft.world.entity.npc.villager.Villager")),
             // 1.21.9 and 1.21.10 moved the villager to npc.villager.Villager and still ship FarmBlock, exactly like
