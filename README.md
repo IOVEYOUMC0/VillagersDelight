@@ -39,6 +39,40 @@ single shared copy of those classes could only ever match one dev bundle: 26.x w
 
 Install either the universal launcher jar or exactly one versioned jar matching the server version.
 
+## Public API for other plugins
+
+`core` also produces an api-only artifact:
+
+```text
+core/build/libs/villagersdelight-core-0.1.1-api.jar
+```
+
+Other Paper plugins can compile against it (`compileOnly`) and read the configured crops without
+depending on CraftEngine or VD internals:
+
+```java
+import com.huidu.villagersdelight.api.CropInfo;
+import com.huidu.villagersdelight.api.VillagersDelightApi;
+
+VillagersDelightApi api = VillagersDelightApi.get();
+if (api.isAvailable()) {
+    for (CropInfo crop : api.crops()) {
+        // plain ids: crop.blockId(), crop.seedItem(), crop.soils(),
+        // crop.harvestMode(), crop.water(), crop.plantBlock()
+    }
+}
+```
+
+- `apiVersion()` is currently `1`.
+- All ids are plain `namespace:path` strings; no CraftEngine type appears in the API.
+- `crops()`, `crop(String)`, `cropBySeed(String)`, `extraSoils()` and `plantableSoils()` are
+  read-only snapshots refreshed by a VillagersDelight reload.
+- An absent/not-yet-ready plugin returns an empty list/null/false instead of throwing.
+- `HarvestMode` is `BREAK`, `PICK` or `TALL`.
+
+The universal launcher and each versioned `nms-*` jar still bundle the API classes; only the separate
+api jar is needed when another plugin wants a small compile-only dependency.
+
 ## Compatibility verification
 
 The [code-path verification](docs/verification-code-paths-2026-10-12.md) also covers crop-rule

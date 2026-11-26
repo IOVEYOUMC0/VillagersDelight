@@ -75,6 +75,44 @@ public final class CropRegistry {
         return reg == null ? null : reg.crops.get(blockId);
     }
 
+    /** Public-api helper: string id overload without forcing callers onto CraftEngine's Key. */
+    @Nullable
+    public static FDCrop cropById(String blockId) {
+        if (blockId == null) {
+            return null;
+        }
+        try {
+            return cropById(Key.of(blockId));
+        } catch (IllegalArgumentException invalid) {
+            return null;
+        }
+    }
+
+    /** Public-api helper: string seed id overload. */
+    @Nullable
+    public static FDCrop cropBySeed(String seedItemId) {
+        if (seedItemId == null) {
+            return null;
+        }
+        try {
+            return cropBySeed(Key.of(seedItemId));
+        } catch (IllegalArgumentException invalid) {
+            return null;
+        }
+    }
+
+    /** Immutable snapshot of the configured global extra soils. */
+    public static Set<Key> extraSoilsSnapshot() {
+        CropRegistry reg = instance;
+        return reg == null ? Set.of() : Set.copyOf(reg.extraSoils);
+    }
+
+    /** Immutable snapshot of every soil accepted by at least one configured crop. */
+    public static Set<Key> plantableSoilsSnapshot() {
+        CropRegistry reg = instance;
+        return reg == null ? Set.of() : Set.copyOf(reg.plantableSoils);
+    }
+
     // Returns the crop behind a raw NMS block state only if it is mature (harvestable).
     @Nullable
     public static FDCrop matureCropOf(ImmutableBlockState state) {

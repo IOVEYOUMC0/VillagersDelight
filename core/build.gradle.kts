@@ -40,6 +40,20 @@ tasks.jar {
     archiveBaseName.set("villagersdelight-core")
 }
 
+// Addon-facing artifact: only the public api package. Other plugins can compileAgainst this jar
+// without pulling in the core plugin/NMS implementation or CraftEngine classes.
+val apiJar by tasks.registering(Jar::class) {
+    archiveBaseName.set("villagersdelight-core")
+    archiveClassifier.set("api")
+    from(sourceSets.getByName("main").output) {
+        include("com/huidu/villagersdelight/api/**")
+    }
+}
+
+tasks.assemble {
+    dependsOn(apiJar)
+}
+
 configurations.testImplementation {
     extendsFrom(configurations.compileOnly.get())
 }
@@ -83,6 +97,14 @@ val checkServerCompatibility = tasks.register<JavaExec>("checkServerCompatibilit
     enableAssertions = true
 }
 
+val checkApi = tasks.register<JavaExec>("checkApi") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.huidu.villagersdelight.core.VillagersDelightApiCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    enableAssertions = true
+}
+
 tasks.check {
-    dependsOn(checkFoodRules, checkCraftMirror, checkBehaviorWithdraw, checkServerCompatibility)
+    dependsOn(checkFoodRules, checkCraftMirror, checkBehaviorWithdraw, checkServerCompatibility, checkApi)
 }
