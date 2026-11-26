@@ -109,7 +109,7 @@ compatibility guarantee.
 | --- | --- | --- | --- |
 | 1.21.5 | `nms-1.21.5` | Matching Paper build passed | No live run in this check |
 | 1.21.6–1.21.8 | `nms-1.21.5` selected | Uses the 1.21.5 compile anchor | No per-patch build or live verification |
-| 1.21.9 / 1.21.10 | `nms-1211` selected | Uses the 1.21.11 layer; the Villager package matches | No per-patch live run |
+| 1.21.9 / 1.21.10 | `nms-1211` selected | Uses the 1.21.11 layer; the source also builds against the 1.21.10 dev bundle | No per-patch live run |
 | 1.21.11 | `nms-1211` | Matching Paper build passed, layer-specific shared classes bundled | No live run in this check |
 | 26.1.2 | `nms-26` | Matching Paper build and three native inventory/behavior tests passed | No new live run on this patch |
 | 26.2 | `nms-26` | Purpur 26.2-2622 passed 17 native menu/farming/pickup and 28 separate compost assertions; prior Folia startup passed | Client interaction, natural full-day schedules and live Folia cross-region tests pending |
@@ -142,6 +142,7 @@ so they cannot share one build). Run `./gradlew shadowJar` inside the module you
 
 - `nms-1.21.5` — Java 21 toolchain, Gradle 9.0, dev bundle `1.21.5-R0.1-SNAPSHOT`.
 - `nms-1211` — Java 21 toolchain, Gradle 9.1, dev bundle `1.21.11-R0.1-SNAPSHOT`.
+  Compatibility check against 1.21.10: `./gradlew build -PdevBundle=1.21.10-R0.1-SNAPSHOT --rerun-tasks`.
 - `nms-26` — Java 25 toolchain (auto-downloaded via foojay), Gradle 9.1, default dev bundle
   `26.1.2.build.74-stable`. MC 26.1+ requires Java 25, so this module compiles with release 25.
   The bundle is overridable for compatibility checks against another release without editing the build:
