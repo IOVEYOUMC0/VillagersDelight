@@ -5,7 +5,12 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Set;
 
 /**
- * Immutable read-only view of one configured VillagersDelight crop.
+ * Immutable read-only snapshot of one configured VillagersDelight crop.
+ *
+ * <p>It contains only strings and an immutable set, never a registry or CraftEngine object, so an
+ * acquired snapshot stays readable across a VillagersDelight reload. It is intentionally a snapshot,
+ * not a live view; use {@link VillagersDelightApi#handle(String)} when a long-lived reference must
+ * follow the current reloaded definition.</p>
  *
  * @param blockId     the CraftEngine crop block id
  * @param ageMax      highest growth property value

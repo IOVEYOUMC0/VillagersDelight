@@ -20,6 +20,16 @@ public final class CeItemAccess {
         return stack == null || stack.isEmpty() ? null : CraftEngineItems.getCustomItemId(stack);
     }
 
+    // Plain id for either a CE custom item or a vanilla material; null for an empty/null stack.
+    @Nullable
+    public static String itemId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return null;
+        }
+        Key custom = customItemId(stack);
+        return custom != null ? custom.toString() : stack.getType().getKey().toString();
+    }
+
     public static boolean isItem(ItemStack stack, Key itemId) {
         Key id = customItemId(stack);
         return id != null && id.equals(itemId);

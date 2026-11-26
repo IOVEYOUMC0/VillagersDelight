@@ -70,6 +70,21 @@ if (api.isAvailable()) {
   read-only snapshots refreshed by a VillagersDelight reload.
 - An absent/not-yet-ready plugin returns an empty list/null/false instead of throwing.
 - `HarvestMode` is `BREAK`, `PICK` or `TALL`.
+- Live block queries: `cropAt(Block)`, `isMature(Block)`, `age(Block)` (`-1` when not a crop),
+  `isUpperHalf(Block)`, `isLowerHalf(Block)` and `isTallCrop(Block)`. They check region ownership and
+  fail closed on the wrong Folia thread.
+- `harvest(Block)` handles both TALL halves, resets the lower stalk, replants PICK crops, spawns the
+  returned drops at the harvested block, and returns a `HarvestResult` whose `drops()` are
+  caller-owned copies. `harvestPreview(Block)` / `harvest(Block, false)` return copies without
+  spawning. CE event-function drops are captured as well as the block loot table.
+- `canPlant(Block, ItemStack)` / `canPlant(Block, String)` validate the current soil/water requirement
+  without placing or consuming anything.
+- `plant(Block, ItemStack)` validates soil/water, places the configured plant block at age 0, and
+  consumes one item from the passed stack on success. `plant(Block, String seedItemId)` does the same
+  but consumes nothing.
+- For a long-lived reference use `handle("namespace:crop")`; a `CropHandle` stores only the id and
+  resolves the current definition after a reload. A `CropInfo` is an immutable snapshot and stays
+  readable but does not update itself.
 
 The universal launcher and each versioned `nms-*` jar still bundle the API classes; only the separate
 api jar is needed when another plugin wants a small compile-only dependency.
